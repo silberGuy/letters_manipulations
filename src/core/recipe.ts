@@ -19,6 +19,11 @@ export const sourceLayoutSchema = z.object({
   padding: numberField({ label: 'Padding (px)', min: 0, max: 500, default: 60 }),
 });
 
+/** Typography controls, shown in the Source panel. */
+export const sourceTypeSchema = sourceLayoutSchema.omit({ padding: true });
+/** Spacing around the text, which sets the exported image's bounds. Shown in the export menu. */
+export const sourceSpacingSchema = sourceLayoutSchema.pick({ padding: true });
+
 export const sourceSchema = sourceLayoutSchema.extend({
   text: z.string(),
   font: fontRefSchema,

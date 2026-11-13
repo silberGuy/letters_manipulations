@@ -35,11 +35,12 @@ function Control({ field, value, onChange }: { field: Field; value: unknown; onC
   const { meta } = field;
   return (
     <label className={`control control-${field.kind}`} title={meta.hint}>
-      <span className="control-label">{field.label}</span>
+      <span className="control-label muted">{field.label}</span>
       {field.kind === 'number' && (
         <span className="control-row">
           {meta.min !== undefined && meta.max !== undefined && (
             <input
+              className="range"
               type="range"
               min={meta.min}
               max={meta.max}
@@ -49,6 +50,7 @@ function Control({ field, value, onChange }: { field: Field; value: unknown; onC
             />
           )}
           <input
+            className="input"
             type="number"
             min={meta.min}
             max={meta.max}
@@ -59,10 +61,10 @@ function Control({ field, value, onChange }: { field: Field; value: unknown; onC
         </span>
       )}
       {field.kind === 'boolean' && (
-        <input type="checkbox" checked={value as boolean} onChange={(e) => onChange(e.target.checked)} />
+        <input className="checkbox" type="checkbox" checked={value as boolean} onChange={(e) => onChange(e.target.checked)} />
       )}
       {field.kind === 'enum' && (
-        <select value={value as string} onChange={(e) => onChange(e.target.value)}>
+        <select className="input" value={value as string} onChange={(e) => onChange(e.target.value)}>
           {field.options.map((o) => (
             <option key={o} value={o}>
               {o}
@@ -71,7 +73,7 @@ function Control({ field, value, onChange }: { field: Field; value: unknown; onC
         </select>
       )}
       {field.kind === 'color' && (
-        <input type="color" value={value as string} onChange={(e) => onChange(e.target.value)} />
+        <input className="swatch" type="color" value={value as string} onChange={(e) => onChange(e.target.value)} />
       )}
       {field.kind === 'point' && <PointControl value={value as Point} onChange={onChange} />}
       {field.kind === 'image' && <ImageControl value={value as AssetRef | null} onChange={onChange} />}
@@ -84,6 +86,7 @@ function PointControl({ value, onChange }: { value: Point; onChange(v: Point): v
     <span className="control-row">
       {(['x', 'y'] as const).map((axis) => (
         <input
+          className="input"
           key={axis}
           type="number"
           min={0}
@@ -103,6 +106,7 @@ function ImageControl({ value, onChange }: { value: AssetRef | null; onChange(v:
   return (
     <span className="control-row">
       <input
+        className="file"
         type="file"
         accept="image/*"
         onChange={async (e) => {
@@ -111,7 +115,7 @@ function ImageControl({ value, onChange }: { value: AssetRef | null; onChange(v:
         }}
       />
       {value && (
-        <button type="button" onClick={() => onChange(null)}>
+        <button type="button" className="btn" onClick={() => onChange(null)}>
           Clear
         </button>
       )}

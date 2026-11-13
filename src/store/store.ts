@@ -16,6 +16,8 @@ export interface AppStore {
   tools: Record<string, Values>;
   /** Messages from loading a Recipe (e.g. version mismatches). */
   warnings: string[];
+  /** The export menu is open, so the canvas outlines what will be exported. */
+  showExportBounds: boolean;
   /**
    * The Source whose image the Steps' State positions are in. Lags behind
    * recipe.source while a new Source is laid out; applyRemap catches it up.
@@ -32,6 +34,7 @@ export interface AppStore {
   addAsset(blob: Blob): Promise<string>;
   loadRecipe(recipe: Recipe, assetBlobs: Record<string, Blob>, warnings: string[]): void;
   dismissWarnings(): void;
+  setShowExportBounds(show: boolean): void;
   /**
    * Move every Step's State from `from` to `to`, if State is still anchored to
    * `from`. Remaps the latest State, so effects added meanwhile move too.
@@ -70,6 +73,7 @@ export const useStore = create<AppStore>()((set, get) => {
     assetBlobs: {},
     tools: {},
     warnings: [],
+    showExportBounds: false,
     anchoredTo: defaultSource,
 
     setSource: (patch) => set(({ recipe }) => ({ recipe: { ...recipe, source: { ...recipe.source, ...patch } } })),
@@ -108,6 +112,8 @@ export const useStore = create<AppStore>()((set, get) => {
     loadRecipe: (recipe, assetBlobs, warnings) => set({ recipe, assetBlobs, warnings, anchoredTo: recipe.source }),
 
     dismissWarnings: () => set({ warnings: [] }),
+
+    setShowExportBounds: (showExportBounds) => set({ showExportBounds }),
 
     applyRemap: (from, to, remap) =>
       set(({ recipe, anchoredTo }) =>

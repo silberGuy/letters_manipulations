@@ -16,7 +16,7 @@ export function App() {
           {warnings.map((w) => (
             <p key={w}>{w}</p>
           ))}
-          <button type="button" onClick={dismissWarnings}>
+          <button type="button" className="btn" onClick={dismissWarnings}>
             Dismiss
           </button>
         </div>

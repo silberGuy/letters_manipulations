@@ -1,4 +1,5 @@
-import { useEffect, useRef, type PointerEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
+import { useStore } from '../store/store';
 
 export interface ImagePoint {
   /** In image pixels. */
@@ -18,11 +19,27 @@ interface Props {
 }
 
 /**
- * Shows an ImageData at its own pixel size, scaled down by CSS to fit, with an
- * SVG overlay and pointer events mapped to image pixel coordinates.
+ * Fills its container. Shows an ImageData centered at its own pixel size
+ * (scaled down to fit, never up), with an SVG overlay spanning the whole
+ * container and pointer events mapped to image pixel coordinates — so points
+ * outside the image are reachable too (negative or beyond width/height).
  */
 export function RasterView({ image, overlay, cursor, onPointerDown, onPointerMove, onPointerUp, onPointerLeave }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState({ width: 0, height: 0 });
+  const showExportBounds = useStore((s) => s.showExportBounds);
+
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setBox({ width, height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [image === null]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -34,25 +51,36 @@ export function RasterView({ image, overlay, cursor, onPointerDown, onPointerMov
 
   if (!image) return null;
 
+  // Screen px per image px. Scale down to fit, never up.
+  const scale = box.width && box.height ? Math.min(1, box.width / image.width, box.height / image.height) : 1;
+  // The whole container, expressed in image pixel coordinates.
+  const viewW = box.width / scale || image.width;
+  const viewH = box.height / scale || image.height;
+  const viewX = (image.width - viewW) / 2;
+  const viewY = (image.height - viewH) / 2;
+
   const toImage = (e: PointerEvent<SVGSVGElement>): ImagePoint => {
     const rect = e.currentTarget.getBoundingClientRect();
     return {
-      x: ((e.clientX - rect.left) / rect.width) * image.width,
-      y: ((e.clientY - rect.top) / rect.height) * image.height,
+      x: viewX + (e.clientX - rect.left) / scale,
+      y: viewY + (e.clientY - rect.top) / scale,
     };
   };
 
   return (
-    <div className="raster-view">
-      <canvas ref={canvasRef} />
+    <div className="raster-view" ref={boxRef}>
+      <canvas ref={canvasRef} style={{ width: image.width * scale, height: image.height * scale }} />
       <svg
-        viewBox={`0 0 ${image.width} ${image.height}`}
+        viewBox={`${viewX} ${viewY} ${viewW} ${viewH}`}
         style={{ cursor }}
         onPointerDown={onPointerDown && ((e) => onPointerDown(toImage(e), e))}
         onPointerMove={onPointerMove && ((e) => onPointerMove(toImage(e), e))}
         onPointerUp={onPointerUp && ((e) => onPointerUp(toImage(e), e))}
         onPointerLeave={onPointerLeave}
       >
+        {showExportBounds && (
+          <rect className="export-bounds" x={0} y={0} width={image.width} height={image.height} vectorEffect="non-scaling-stroke" />
+        )}
         {overlay}
       </svg>
     </div>

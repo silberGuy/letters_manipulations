@@ -38,10 +38,10 @@ export function FontPicker({ value, onChange }: { value: FontRef; onChange(ref: 
   };
 
   return (
-    <div className="font-picker">
+    <div className="controls">
       <label className="control">
-        <span className="control-label">Font</span>
-        <select value={current?.key ?? ''} onChange={(e) => pickFamily(e.target.value)}>
+        <span className="control-label muted">Font</span>
+        <select className="input" value={current?.key ?? ''} onChange={(e) => pickFamily(e.target.value)}>
           {!current && <option value="">(unlisted font)</option>}
           {[...groups].map(([group, fams]) => (
             <optgroup key={group} label={group}>
@@ -56,8 +56,9 @@ export function FontPicker({ value, onChange }: { value: FontRef; onChange(ref: 
       </label>
       {current && current.variants.length > 1 && (
         <label className="control">
-          <span className="control-label">Weight</span>
+          <span className="control-label muted">Weight</span>
           <select
+            className="input"
             value={currentVariant?.label}
             onChange={(e) =>
               onChange({ loader: current.loader, args: current.variants.find((v) => v.label === e.target.value)!.args })

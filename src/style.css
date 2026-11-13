@@ -1,0 +1,498 @@
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans+Code:wght@400;500;700&display=swap');
+
+/* ==========================================================================
+   Tokens — change these to restyle the whole app
+   ========================================================================== */
+
+:root {
+  --ink: #0a0a0a; /* outlines, lines, buttons, text */
+  --paper: #f1f1f1; /* background, text on ink */
+  --muted: var(--ink); /* secondary text (labels, hints). Same as ink for now */
+
+  --line: 2px; /* outline width for elements (buttons, fields, popovers) */
+  --border: var(--line) solid var(--ink);
+  --divider-line: 2px; /* separators between UI parts (top bar, panels) */
+  --divider: var(--divider-line) solid var(--ink);
+  --range-track: 3px; /* thickness of the slider line */
+  --bounds-line: 3px; /* export bounding box on the canvas */
+  --bounds-dash: 6 4;
+  --radius: 0;
+
+  --pad-btn: 0.25em 0.75em; /* buttons */
+  --pad-field: 0.25em 0.75em; /* text fields, number fields, selects */
+  --gap: 8px;
+  --pad-panel: 12px;
+
+  --font: 13px/1.4 'Google Sans Code', ui-monospace, monospace;
+}
+
+/* ==========================================================================
+   Base
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  border-radius: var(--radius);
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  font: var(--font);
+  color: var(--ink);
+  background: var(--paper);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: var(--line) solid var(--ink);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* ==========================================================================
+   Generic classes
+   ========================================================================== */
+
+/* --- Layout --- */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* --- Lines --- */
+
+.bordered {
+  border: var(--border);
+}
+
+.border-top {
+  border-top: var(--divider);
+}
+
+.border-bottom {
+  border-bottom: var(--divider);
+}
+
+.border-left {
+  border-left: var(--divider);
+}
+
+.border-right {
+  border-right: var(--divider);
+}
+
+/* --- Text --- */
+
+.muted {
+  color: var(--muted);
+}
+
+.label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* --- Inverted block (ink background, paper text) --- */
+
+.inverted {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* --- Button --- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  padding: var(--pad-btn);
+  border: var(--border);
+  background: var(--ink);
+  color: var(--paper);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.btn:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.btn:active {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Outline variant: paper fill, ink line */
+.btn-outline {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.btn-outline:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* --- Text fields, number fields, selects, textareas --- */
+
+.input {
+  padding: var(--pad-field);
+  border: var(--border);
+  background: var(--paper);
+  color: var(--ink);
+  min-width: 0;
+}
+
+select.input {
+  appearance: none;
+  padding-right: 2em;
+  cursor: pointer;
+  /* chevron drawn with the ink color */
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--ink) 50%),
+    linear-gradient(135deg, var(--ink) 50%, transparent 50%);
+  background-position:
+    calc(100% - 13px) 50%,
+    calc(100% - 8px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+textarea.input {
+  resize: vertical;
+}
+
+/* --- Range slider --- */
+
+.range {
+  appearance: none;
+  height: 14px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.range::-webkit-slider-runnable-track {
+  height: var(--range-track);
+  background: var(--ink);
+}
+
+.range::-moz-range-track {
+  height: var(--range-track);
+  background: var(--ink);
+}
+
+.range::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: calc(-6px + var(--range-track) / 2);
+  background: var(--ink);
+  border: none;
+}
+
+.range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: var(--ink);
+  border: none;
+  border-radius: var(--radius);
+}
+
+/* --- Checkbox --- */
+
+.checkbox {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: var(--border);
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.checkbox:checked {
+  background: var(--ink);
+  box-shadow: inset 0 0 0 2px var(--paper);
+}
+
+/* --- Color swatch --- */
+
+.swatch {
+  appearance: none;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  border: var(--border);
+  background: none;
+  cursor: pointer;
+}
+
+.swatch::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.swatch::-webkit-color-swatch {
+  border: none;
+}
+
+.swatch::-moz-color-swatch {
+  border: none;
+}
+
+/* --- File input --- */
+
+.file {
+  min-width: 0;
+}
+
+.file::file-selector-button {
+  margin-right: 0.5em;
+  padding: var(--pad-btn);
+  border: var(--border);
+  background: var(--ink);
+  color: var(--paper);
+  font: inherit;
+  cursor: pointer;
+}
+
+.file::file-selector-button:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* --- Disclosure (<details>) summary --- */
+
+.summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.summary::-webkit-details-marker {
+  display: none;
+}
+
+.summary::before {
+  content: '+ ';
+}
+
+details[open] > .summary::before {
+  content: '− ';
+}
+
+/* ==========================================================================
+   App layout
+   ========================================================================== */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.topbar {
+  padding: var(--gap) var(--pad-panel);
+  border-bottom: var(--divider);
+}
+
+.warnings {
+  padding: var(--gap) var(--pad-panel);
+  border-bottom: var(--divider);
+}
+
+.warnings p {
+  margin: 0 0 4px;
+}
+
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 280px 1fr 300px;
+}
+
+.panel {
+  overflow: auto;
+  padding: var(--pad-panel);
+}
+
+.panel h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.panel h3 {
+  margin: 16px 0 8px;
+}
+
+/* ==========================================================================
+   Controls
+   ========================================================================== */
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.control-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.control-row .range {
+  flex: 1;
+}
+
+.control-row input[type='number'] {
+  width: 72px;
+}
+
+.control-boolean {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.source-text {
+  font-size: 16px;
+}
+
+.advanced {
+  margin-top: 16px;
+}
+
+.advanced > .summary {
+  margin-bottom: 8px;
+}
+
+/* ==========================================================================
+   Editor / canvas
+   ========================================================================== */
+
+.editor {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Fills the editor; the image is centered inside it */
+.raster-view {
+  position: absolute;
+  inset: 0;
+  line-height: 0;
+}
+
+.raster-view canvas {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.raster-view svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.output-status {
+  position: absolute;
+  z-index: 1;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--pad-btn);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.output-status.error {
+  background: var(--paper);
+  color: var(--ink);
+  border: var(--border);
+}
+
+/* What will be exported, shown while the export menu is open */
+.export-bounds {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: var(--bounds-line);
+  stroke-dasharray: var(--bounds-dash);
+  shape-rendering: crispEdges; /* snap to whole pixels so 1px stays solid black, not anti-aliased grey */
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   Popover
+   ========================================================================== */
+
+.popover {
+  position: relative;
+}
+
+.popover-body {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 10;
+  width: 260px;
+  padding: var(--pad-panel);
+  background: var(--paper);
+  border: var(--border);
+}
+
+.hint {
+  margin: 0 0 8px;
+}

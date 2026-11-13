@@ -4,6 +4,7 @@ import { rasterToPngBlob } from '../core/raster';
 import { MANIPULATIONS } from '../manipulations';
 import { assetResolver } from '../store/assets';
 import { loadBundle, saveBundle } from '../store/bundle';
+import { sourceSpacingSchema, type Source } from '../core/recipe';
 import { useStore } from '../store/store';
 import { vectorize, vectorizeOptionsSchema, type VectorizeOptions } from '../vectorize/vectorize';
 import { ControlsPanel } from './ControlsPanel';
@@ -13,6 +14,9 @@ export function TopBar() {
   const manipulationId = useStore((s) => s.recipe.steps[0].manipulationId);
   const selectManipulation = useStore((s) => s.selectManipulation);
   const loadRecipe = useStore((s) => s.loadRecipe);
+  const source = useStore((s) => s.recipe.source);
+  const setSource = useStore((s) => s.setSource);
+  const setShowExportBounds = useStore((s) => s.setShowExportBounds);
   const fileInput = useRef<HTMLInputElement>(null);
   const [traceOptions, setTraceOptions] = useState<VectorizeOptions>(() => vectorizeOptionsSchema.parse({}));
   const [busy, setBusy] = useState<string | null>(null);
@@ -50,9 +54,9 @@ export function TopBar() {
   });
 
   return (
-    <header className="topbar">
+    <header className="topbar row">
       <strong>Letters</strong>
-      <select value={manipulationId} onChange={(e) => selectManipulation(0, e.target.value)}>
+      <select className="input" value={manipulationId} onChange={(e) => selectManipulation(0, e.target.value)}>
         {MANIPULATIONS.map((m) => (
           <option key={m.id} value={m.id}>
             {m.label}
@@ -60,11 +64,11 @@ export function TopBar() {
         ))}
       </select>
       <span className="spacer" />
-      {busy && <span className="busy">{busy}…</span>}
-      <button type="button" onClick={save}>
+      {busy && <span className="muted">{busy}…</span>}
+      <button type="button" className="btn" onClick={save}>
         Save
       </button>
-      <button type="button" onClick={() => fileInput.current?.click()}>
+      <button type="button" className="btn" onClick={() => fileInput.current?.click()}>
         Load
       </button>
       <input
@@ -82,16 +86,30 @@ export function TopBar() {
           })();
         }}
       />
-      <button type="button" onClick={exportPng}>
-        Export PNG
-      </button>
-      <button type="button" onClick={exportSvg}>
-        Export SVG
-      </button>
+      <details className="popover" onToggle={(e) => setShowExportBounds(e.currentTarget.open)}>
+        <summary className="btn summary">Export</summary>
+        <div className="popover-body stack">
+          <p className="hint muted">The outline on the canvas shows what will be exported.</p>
+          <ControlsPanel
+            schema={sourceSpacingSchema}
+            owner="export spacing"
+            values={source}
+            onChange={(v) => setSource(v as Partial<Source>)}
+          />
+          <div className="row">
+            <button type="button" className="btn" onClick={exportPng}>
+              PNG
+            </button>
+            <button type="button" className="btn" onClick={exportSvg}>
+              SVG
+            </button>
+          </div>
+        </div>
+      </details>
       <details className="popover">
-        <summary title="Used when the Manipulation has no native vector output">Trace settings</summary>
+        <summary className="btn summary" title="Used when the Manipulation has no native vector output">Trace settings</summary>
         <div className="popover-body">
-          <p className="hint">Used when the Manipulation has no native vector, so the SVG is traced from pixels.</p>
+          <p className="hint muted">Used when the Manipulation has no native vector, so the SVG is traced from pixels.</p>
           <ControlsPanel
             schema={vectorizeOptionsSchema}
             owner="vectorize"
