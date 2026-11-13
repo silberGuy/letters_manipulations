@@ -49,7 +49,7 @@ A user-supplied file (e.g. an uploaded image) that a Recipe refers to by content
 _Avoid_: Attachment, upload, resource
 
 **Output**:
-The image a Manipulation produces from its input; always raster, optionally also vector.
+The image a Step produces from its input; always raster, optionally also vector. The Recipe's Output is its last Step's Output.
 _Avoid_: Result, export, render
 
 **Export**:
