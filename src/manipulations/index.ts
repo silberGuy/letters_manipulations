@@ -3,10 +3,11 @@ import type { Manipulation } from '../core/manipulation';
 import { bubblingAcid } from './bubbling-acid';
 import { goo } from './goo';
 import { hole } from './hole';
+import { eatingAcid } from './eating-acid';
 import { skew } from './skew';
 import { tear } from './tear';
 
-export const MANIPULATIONS: Manipulation[] = [goo, skew, hole, bubblingAcid, tear];
+export const MANIPULATIONS: Manipulation[] = [goo, skew, hole, bubblingAcid, eatingAcid, tear];
 
 // Fail at startup, not mid-session, if a Manipulation's schemas are unusable.
 for (const m of MANIPULATIONS) {

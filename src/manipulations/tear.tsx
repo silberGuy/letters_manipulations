@@ -6,7 +6,7 @@ import {
 	type EditorProps,
 	type RenderContext,
 } from "../core/manipulation";
-import { createRaster } from "../core/raster";
+import { PushCanvas, type Ellipse } from "../core/push";
 import type { Rng } from "../core/rng";
 import { useRender } from "../core/useRender";
 import { OutputStatus } from "../ui/OutputStatus";
@@ -140,22 +140,12 @@ type Cut = z.output<typeof cutSchema>;
 // ---------------------------------------------------------------------------
 // Laying out a Cut's ellipses
 
-interface Ellipse {
-	cx: number;
-	cy: number;
-	/** Angle of the across-stroke (long) axis, radians. */
-	angle: number;
-	/** Across-stroke radius, px. */
-	a: number;
-	/** Along-stroke radius, px. */
-	b: number;
-	/** Push fades out at this many radii. */
-	reach: number;
-}
-
 const easeOut = (x: number) => 1 - (1 - x) ** 3;
 
-/** The Cut's ellipses in pixels, in stroke order. */
+/**
+ * The Cut's ellipses in pixels, in stroke order. `a` is the across-stroke
+ * radius, `b` the along-stroke one.
+ */
 function cutEllipses(cut: Cut, W: number, H: number, rng: Rng): Ellipse[] {
 	const pts = cut.points.map((p) => ({ x: p.x * W, y: p.y * H, t: p.t }));
 	if (pts.length < 2) return [];
@@ -242,130 +232,7 @@ function cutEllipses(cut: Cut, W: number, H: number, rng: Rng): Ellipse[] {
 }
 
 // ---------------------------------------------------------------------------
-// Warping: each ellipse opens like a hole in incompressible rubber
-
-/** Premultiplied RGBA as floats, one entry per channel. */
-type Buffer = Float32Array;
-
-/** Bilinear sample at (x, y) in pixel-center coordinates; transparent outside. */
-function sample(
-	buf: Buffer,
-	W: number,
-	H: number,
-	x: number,
-	y: number,
-	out: Float32Array,
-) {
-	const x0 = Math.floor(x);
-	const y0 = Math.floor(y);
-	const fx = x - x0;
-	const fy = y - y0;
-	out.fill(0);
-	for (let j = 0; j < 2; j++) {
-		const yy = y0 + j;
-		if (yy < 0 || yy >= H) continue;
-		const wy = j ? fy : 1 - fy;
-		for (let i = 0; i < 2; i++) {
-			const xx = x0 + i;
-			if (xx < 0 || xx >= W) continue;
-			const w = wy * (i ? fx : 1 - fx);
-			const k = (yy * W + xx) * 4;
-			out[0] += buf[k] * w;
-			out[1] += buf[k + 1] * w;
-			out[2] += buf[k + 2] * w;
-			out[3] += buf[k + 3] * w;
-		}
-	}
-}
-
-const smoothstep = (e0: number, e1: number, x: number) => {
-	const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
-	return t * t * (3 - 2 * t);
-};
-
-/**
- * Open one ellipse in `buf`, in place. In the ellipse's normalized frame (where
- * it's the unit circle), a point at distance ρ came from √(ρ² − 1): the ring
- * of material keeps its area as the hole opens, so the ink inside is pushed
- * out around it. The push is scaled by `strength` and fades to nothing at
- * `reach`, which keeps the map monotonic (no folds). Marks every pixel it
- * moves in `pushed`.
- */
-function openEllipse(
-	buf: Buffer,
-	pushed: Uint8Array,
-	W: number,
-	H: number,
-	e: Ellipse,
-	strength: number,
-) {
-	const cos = Math.cos(e.angle);
-	const sin = Math.sin(e.angle);
-	const A = e.a * e.reach;
-	const B = e.b * e.reach;
-	const ex = Math.sqrt(A * A * cos * cos + B * B * sin * sin);
-	const ey = Math.sqrt(A * A * sin * sin + B * B * cos * cos);
-	const x0 = Math.max(0, Math.floor(e.cx - ex));
-	const x1 = Math.min(W - 1, Math.ceil(e.cx + ex));
-	const y0 = Math.max(0, Math.floor(e.cy - ey));
-	const y1 = Math.min(H - 1, Math.ceil(e.cy + ey));
-	if (x0 > x1 || y0 > y1) return;
-
-	const bw = x1 - x0 + 1;
-	const tmp = new Float32Array(bw * (y1 - y0 + 1) * 4);
-	const px = new Float32Array(4);
-	const R = e.reach;
-
-	for (let y = y0; y <= y1; y++) {
-		for (let x = x0; x <= x1; x++) {
-			const t = ((y - y0) * bw + (x - x0)) * 4;
-			const dx = x + 0.5 - e.cx;
-			const dy = y + 0.5 - e.cy;
-			const u = dx * cos + dy * sin;
-			const v = -dx * sin + dy * cos;
-			const qx = u / e.a;
-			const qy = v / e.b;
-			const rho = Math.hypot(qx, qy);
-			const k = (y * W + x) * 4;
-			if (rho >= R) {
-				tmp[t] = buf[k];
-				tmp[t + 1] = buf[k + 1];
-				tmp[t + 2] = buf[k + 2];
-				tmp[t + 3] = buf[k + 3];
-				continue;
-			}
-			pushed[y * W + x] = 1;
-			if (rho < 1e-6) continue; // Center of the hole: transparent.
-			// Signed distance to the hole's edge in pixels (first order), for anti-aliasing.
-			const grad = Math.hypot(qx / e.a, qy / e.b) / rho;
-			const cov = Math.min(1, Math.max(0, (rho - 1) / grad + 0.5));
-			if (cov === 0) continue;
-			const r = Math.max(1, rho);
-			const push = r - Math.sqrt(r * r - 1);
-			const rhoIn = r - strength * (1 - smoothstep(1, R, r)) * push;
-			const f = rhoIn / rho;
-			const su = u * f;
-			const sv = v * f;
-			sample(
-				buf,
-				W,
-				H,
-				e.cx + su * cos - sv * sin - 0.5,
-				e.cy + su * sin + sv * cos - 0.5,
-				px,
-			);
-			tmp[t] = px[0] * cov;
-			tmp[t + 1] = px[1] * cov;
-			tmp[t + 2] = px[2] * cov;
-			tmp[t + 3] = px[3] * cov;
-		}
-	}
-
-	for (let y = y0; y <= y1; y++) {
-		const row = (y - y0) * bw * 4;
-		buf.set(tmp.subarray(row, row + bw * 4), (y * W + x0) * 4);
-	}
-}
+// Render
 
 /** Cuts the letters open along each Cut, in the order they were made. */
 async function render({
@@ -374,44 +241,24 @@ async function render({
 	state,
 	rng,
 }: RenderContext<Params, State>) {
-	const { width: W, height: H, data } = input;
-	const buf: Buffer = new Float32Array(W * H * 4);
-	for (let i = 0; i < W * H; i++) {
-		const a = data[i * 4 + 3] / 255;
-		buf[i * 4] = (data[i * 4] / 255) * a;
-		buf[i * 4 + 1] = (data[i * 4 + 1] / 255) * a;
-		buf[i * 4 + 2] = (data[i * 4 + 2] / 255) * a;
-		buf[i * 4 + 3] = a;
-	}
-
-	const pushed = new Uint8Array(W * H);
-	const px = new Float32Array(4);
+	const canvas = new PushCanvas(input);
 	state.cuts.forEach((cut, index) => {
-		const ellipses = cutEllipses(cut, W, H, rng.fork(`cut ${index}`));
+		const ellipses = cutEllipses(
+			cut,
+			input.width,
+			input.height,
+			rng.fork(`cut ${index}`),
+		);
 		// Test for ink against the image as it was when this Cut began: its own
 		// ellipses overlap, so testing as it goes would land each center in the
 		// previous hole. Ink pushed out by earlier Cuts can still be torn.
-		const onInk = ellipses.map((e) => {
-			sample(buf, W, H, e.cx - 0.5, e.cy - 0.5, px);
-			return px[3] >= INK_ALPHA;
-		});
+		const onInk = ellipses.map((e) => canvas.alphaAt(e.cx, e.cy) >= INK_ALPHA);
 		ellipses.forEach((e, i) => {
-			if (onInk[i]) openEllipse(buf, pushed, W, H, e, params.pushStrength);
+			if (onInk[i]) canvas.open(e, params.pushStrength);
 		});
 	});
-
-	const out = createRaster(W, H);
-	const o = out.data;
-	for (let i = 0; i < W * H; i++) {
-		const a = buf[i * 4 + 3];
-		if (a <= 0 || (pushed[i] && a < PUSHED_MIN_ALPHA)) continue;
-		o[i * 4] = Math.round((buf[i * 4] / a) * 255);
-		o[i * 4 + 1] = Math.round((buf[i * 4 + 1] / a) * 255);
-		o[i * 4 + 2] = Math.round((buf[i * 4 + 2] / a) * 255);
-		o[i * 4 + 3] = Math.round(a * 255);
-	}
 	// No native SVG: export traces the raster, only when asked.
-	return { raster: out };
+	return { raster: canvas.toImageData(PUSHED_MIN_ALPHA) };
 }
 
 // ---------------------------------------------------------------------------
