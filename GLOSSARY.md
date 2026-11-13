@@ -40,6 +40,10 @@ _Avoid_: Click, tap, touch
 A stroke the user dragged in a Manipulation's editor, stored in State as timed points; render opens ellipses along it as they were reached in time.
 _Avoid_: Slash, line, path
 
+**Grid Point**:
+A corner of the grid laid over the image in a Manipulation's editor; the user drags Grid Points, alone or box-selected together, and render maps each cell bilinearly onto the quad of its moved corners. Stored in State as its rest position and offset.
+_Avoid_: Node, vertex, handle
+
 **Asset**:
 A user-supplied file (e.g. an uploaded image) that a Recipe refers to by content hash and carries with it.
 _Avoid_: Attachment, upload, resource

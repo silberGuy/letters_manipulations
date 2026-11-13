@@ -497,3 +497,28 @@ details[open] > .summary::before {
 .hint {
   margin: 0 0 var(--gap);
 }
+
+/* --- Grid Warp overlay --- */
+
+.grid-line {
+  fill: none;
+  stroke: #9a9a9a;
+  stroke-width: 2px;
+}
+
+.grid-point {
+  fill: var(--paper);
+  stroke: var(--ink);
+  stroke-width: 2px;
+}
+
+.grid-point.selected {
+  fill: var(--ink);
+}
+
+.grid-select-box {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1px;
+  stroke-dasharray: 4 3;
+}
