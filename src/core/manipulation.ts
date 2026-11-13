@@ -5,7 +5,12 @@ import type { Rng } from './rng';
 /** What a Manipulation produces. Raster always; vector when it has one. */
 export interface Output {
   raster: ImageData;
-  svg?: string;
+  /**
+   * Native vector, if the Manipulation has one. Return a function when it's
+   * costly to build: it's only called when the Output is exported, never for
+   * the live preview. It must be deterministic like render itself.
+   */
+  svg?: string | (() => Promise<string>);
 }
 
 /** Read access to the Recipe's Assets. */

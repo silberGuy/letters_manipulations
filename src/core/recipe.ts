@@ -45,6 +45,6 @@ export type Recipe = z.output<typeof recipeSchema>;
 
 export const defaultSource: Source = {
   ...sourceLayoutSchema.parse({}),
-  text: 'אותיות\nLetters',
+  text: 'לטרינג',
   font: { loader: 'google', args: { family: 'Rubik', weight: 700 } },
 };

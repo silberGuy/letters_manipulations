@@ -32,6 +32,10 @@ _Avoid_: Data, interaction log
 Values that shape how the user interacts with a Manipulation's editor (e.g. brush size) but that render never reads. Not part of the Recipe; their effect lives on in the State they produce.
 _Avoid_: Params, UI state
 
+**Press**:
+A point the user held down in a Manipulation's editor, stored in State with how long it was held; render grows its effect from the point for that duration.
+_Avoid_: Click, tap, touch
+
 **Asset**:
 A user-supplied file (e.g. an uploaded image) that a Recipe refers to by content hash and carries with it.
 _Avoid_: Attachment, upload, resource
@@ -39,3 +43,7 @@ _Avoid_: Attachment, upload, resource
 **Output**:
 The image a Manipulation produces from its input; always raster, optionally also vector.
 _Avoid_: Result, export, render
+
+**Export**:
+The UI action that saves an Output to a file (PNG, SVG). Manipulations produce Outputs; they never export.
+_Avoid_: Output, download, save

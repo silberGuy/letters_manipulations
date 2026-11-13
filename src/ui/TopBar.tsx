@@ -42,7 +42,10 @@ export function TopBar() {
   const exportSvg = run('Export SVG', async () => {
     const output = await renderRecipe(useStore.getState().recipe, assetResolver);
     const traced = !output.svg;
-    const svg = output.svg ?? (await vectorize(output.raster, traceOptions));
+    const svg =
+      typeof output.svg === 'function'
+        ? await output.svg()
+        : (output.svg ?? (await vectorize(output.raster, traceOptions)));
     download(new Blob([svg], { type: 'image/svg+xml' }), `letters-${timestamp()}${traced ? '-traced' : ''}.svg`);
   });
 
