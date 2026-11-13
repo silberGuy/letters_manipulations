@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Google+Sans+Code:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geo:ital@0;1&display=swap');
 
 /* ==========================================================================
    Tokens — change these to restyle the whole app
@@ -20,10 +20,10 @@
 
   --pad-btn: 0.25em 0.75em; /* buttons */
   --pad-field: 0.25em 0.75em; /* text fields, number fields, selects */
-  --gap: 8px;
-  --pad-panel: 12px;
+  --gap: 4px; /* base spacing unit; most margins and gaps are multiples of it */
+  --pad-panel: 8px;
 
-  --font: 13px/1.4 'Google Sans Code', ui-monospace, monospace;
+  --font: 18px/1.3 'Geo', ui-monospace, monospace;
 }
 
 /* ==========================================================================
@@ -119,7 +119,7 @@ textarea {
 }
 
 .label {
-  font-size: 11px;
+  font-size: 0.85em;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -224,16 +224,17 @@ textarea.input {
 
 .range::-webkit-slider-thumb {
   appearance: none;
-  width: 12px;
-  height: 12px;
-  margin-top: calc(-6px + var(--range-track) / 2);
+  width: 14px;
+  height: 14px;
+  margin-top: calc(-7px + var(--range-track) / 2);
   background: var(--ink);
   border: none;
+  transform: rotate(-7deg);
 }
 
 .range::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   background: var(--ink);
   border: none;
   border-radius: var(--radius);
@@ -341,7 +342,7 @@ details[open] > .summary::before {
 }
 
 .warnings p {
-  margin: 0 0 4px;
+  margin: 0 0 var(--gap);
 }
 
 .workspace {
@@ -357,12 +358,12 @@ details[open] > .summary::before {
 }
 
 .panel h2 {
-  margin: 0 0 12px;
-  font-size: 14px;
+  margin: 0 0 calc(var(--gap) * 2);
+  font-size: 1.15em;
 }
 
 .panel h3 {
-  margin: 16px 0 8px;
+  margin: calc(var(--gap) * 3) 0 var(--gap);
 }
 
 /* ==========================================================================
@@ -372,19 +373,19 @@ details[open] > .summary::before {
 .controls {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 10px;
+  gap: calc(var(--gap) * 2);
+  margin-bottom: calc(var(--gap) * 2);
 }
 
 .control {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(var(--gap) / 2);
 }
 
 .control-row {
   display: flex;
-  gap: 6px;
+  gap: var(--gap);
   align-items: center;
 }
 
@@ -403,15 +404,15 @@ details[open] > .summary::before {
 }
 
 .source-text {
-  font-size: 16px;
+  font-size: 1.25em;
 }
 
 .advanced {
-  margin-top: 16px;
+  margin-top: calc(var(--gap) * 3);
 }
 
 .advanced > .summary {
-  margin-bottom: 8px;
+  margin-bottom: var(--gap);
 }
 
 /* ==========================================================================
@@ -494,5 +495,5 @@ details[open] > .summary::before {
 }
 
 .hint {
-  margin: 0 0 8px;
+  margin: 0 0 var(--gap);
 }
