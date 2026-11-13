@@ -1,0 +1,207 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  font: 13px/1.4 system-ui, sans-serif;
+  color: #1c1c1c;
+  background: #f4f4f2;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #ddd;
+  background: #fff;
+}
+
+.topbar .spacer {
+  flex: 1;
+}
+
+.busy {
+  color: #888;
+}
+
+.warnings {
+  padding: 8px 12px;
+  background: #fff4d6;
+  border-bottom: 1px solid #f0d58a;
+}
+
+.warnings p {
+  margin: 0 0 4px;
+}
+
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 280px 1fr 300px;
+}
+
+.panel {
+  overflow: auto;
+  padding: 12px;
+  background: #fff;
+  border-right: 1px solid #ddd;
+}
+
+.panel:last-child {
+  border-right: none;
+  border-left: 1px solid #ddd;
+}
+
+.panel h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.panel h3 {
+  margin: 16px 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #777;
+}
+
+.controls,
+.font-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.control-label {
+  color: #555;
+}
+
+.control-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.control-row input[type='range'] {
+  flex: 1;
+}
+
+.control-row input[type='number'] {
+  width: 72px;
+}
+
+.control-boolean {
+  flex-direction: row;
+  justify-content: space-between;
+}
+
+textarea {
+  font: inherit;
+  font-size: 16px;
+  resize: vertical;
+}
+
+.advanced {
+  margin-top: 16px;
+}
+
+.advanced summary {
+  cursor: pointer;
+  color: #777;
+  margin-bottom: 8px;
+}
+
+.editor {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow: auto;
+}
+
+.raster-view {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+  background: repeating-conic-gradient(#e6e6e6 0% 25%, #fff 0% 50%) 50% / 16px 16px;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+}
+
+.raster-view canvas {
+  display: block;
+  max-width: calc(100vw - 640px);
+  max-height: calc(100vh - 120px);
+}
+
+.raster-view svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.output-status {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 0.7);
+  color: #fff;
+}
+
+.output-status.error {
+  background: #c62828;
+}
+
+.popover {
+  position: relative;
+}
+
+.popover summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 2px 6px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+}
+
+.popover-body {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 10;
+  width: 260px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #ddd;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.12);
+}
+
+.hint {
+  margin: 0 0 8px;
+  color: #777;
+}
