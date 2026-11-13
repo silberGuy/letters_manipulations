@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { enumField, numberField } from './fields';
+import { colorField, enumField, numberField } from './fields';
 
 export const fontRefSchema = z.object({
   /** Id of a registered font loader. */
@@ -17,6 +17,7 @@ export const sourceLayoutSchema = z.object({
   align: enumField(['start', 'center', 'end'], { label: 'Align', default: 'center' }),
   direction: enumField(['auto', 'rtl', 'ltr'], { label: 'Direction', default: 'auto' }),
   padding: numberField({ label: 'Padding (px)', min: 0, max: 500, default: 60 }),
+  color: colorField({ label: 'Color', default: '#000000' }),
 });
 
 /** Typography controls, shown in the Source panel. */

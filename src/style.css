@@ -6,7 +6,7 @@
 
 :root {
   --ink: #0a0a0a; /* outlines, lines, buttons, text */
-  --paper: #f1f1f1; /* background, text on ink */
+  --paper: #f6f6f6; /* background, text on ink */
   --muted: var(--ink); /* secondary text (labels, hints). Same as ink for now */
 
   --line: 2px; /* outline width for elements (buttons, fields, popovers) */

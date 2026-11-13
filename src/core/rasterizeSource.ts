@@ -3,7 +3,7 @@ import { context2d } from './raster';
 import type { Source } from './recipe';
 
 /**
- * Draw the Source as black ink on transparent paper. The canvas is fitted to
+ * Draw the Source as ink in its color on transparent paper. The canvas is fitted to
  * the text plus padding.
  */
 export async function rasterizeSource(source: Source): Promise<ImageData> {
@@ -11,7 +11,7 @@ export async function rasterizeSource(source: Source): Promise<ImageData> {
   const canvas = new OffscreenCanvas(metrics.width, metrics.height);
   const ctx = context2d(canvas);
   applyTextStyle(ctx, metrics.fontString, source.letterSpacing);
-  ctx.fillStyle = '#000';
+  ctx.fillStyle = source.color;
 
   for (const line of metrics.lines) {
     ctx.direction = line.direction;

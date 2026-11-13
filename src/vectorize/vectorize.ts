@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { numberField } from '../core/fields';
+import { inkColor, rgbToHex } from '../core/raster';
 
 /**
  * Trace a raster's ink into SVG with Potrace. Ink is read from alpha
@@ -48,7 +49,7 @@ function binarize(image: ImageData, threshold: number): ImageData {
 
 export async function vectorize(image: ImageData, options: VectorizeOptions): Promise<string> {
   const { potrace } = await loadPotrace();
-  return potrace(binarize(image, options.threshold), {
+  const svg = await potrace(binarize(image, options.threshold), {
     turdsize: options.speckle,
     turnpolicy: 4,
     alphamax: options.smoothness,
@@ -59,4 +60,6 @@ export async function vectorize(image: ImageData, options: VectorizeOptions): Pr
     posterizelevel: 2,
     posterizationalgorithm: 0,
   });
+  // Potrace traces black; paint the shapes in the ink's own color.
+  return svg.replace(/fill="#000000"/gi, `fill="${rgbToHex(inkColor(image))}"`);
 }
