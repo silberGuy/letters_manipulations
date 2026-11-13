@@ -30,17 +30,17 @@ export function TopBar() {
   };
 
   const save = run('Save', async () => {
-    const { recipe, assetBlobs } = useStore.getState();
-    download(await saveBundle(recipe, assetBlobs), `letters-${timestamp()}.zip`);
+    const recipe = await useStore.getState().reconcile();
+    download(await saveBundle(recipe, useStore.getState().assetBlobs), `letters-${timestamp()}.zip`);
   });
 
   const exportPng = run('Export PNG', async () => {
-    const output = await renderRecipe(useStore.getState().recipe, assetResolver);
+    const output = await renderRecipe(await useStore.getState().reconcile(), assetResolver);
     download(await rasterToPngBlob(output.raster), `letters-${timestamp()}.png`);
   });
 
   const exportSvg = run('Export SVG', async () => {
-    const output = await renderRecipe(useStore.getState().recipe, assetResolver);
+    const output = await renderRecipe(await useStore.getState().reconcile(), assetResolver);
     const traced = !output.svg;
     const svg =
       typeof output.svg === 'function'

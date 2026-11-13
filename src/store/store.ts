@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { Manipulation, Updater } from '../core/manipulation';
+import { remapSteps } from '../core/pipeline';
 import { defaultSource, type Recipe, type Source, type Step } from '../core/recipe';
+import { remapBetween, type Remap } from '../core/remap';
 import { randomSeed } from '../core/rng';
 import { getManipulation, MANIPULATIONS } from '../manipulations';
 
@@ -14,6 +16,11 @@ export interface AppStore {
   tools: Record<string, Values>;
   /** Messages from loading a Recipe (e.g. version mismatches). */
   warnings: string[];
+  /**
+   * The Source whose image the Steps' State positions are in. Lags behind
+   * recipe.source while a new Source is laid out; applyRemap catches it up.
+   */
+  anchoredTo: Source;
 
   setSource(patch: Partial<Source>): void;
   selectManipulation(stepIndex: number, id: string): void;
@@ -25,6 +32,13 @@ export interface AppStore {
   addAsset(blob: Blob): Promise<string>;
   loadRecipe(recipe: Recipe, assetBlobs: Record<string, Blob>, warnings: string[]): void;
   dismissWarnings(): void;
+  /**
+   * Move every Step's State from `from` to `to`, if State is still anchored to
+   * `from`. Remaps the latest State, so effects added meanwhile move too.
+   */
+  applyRemap(from: Source, to: Source, remap: Remap): void;
+  /** Bring State up to date with the Source (before saving or exporting). */
+  reconcile(): Promise<Recipe>;
 }
 
 export function createStep(m: Manipulation, seed = randomSeed()): Step {
@@ -56,6 +70,7 @@ export const useStore = create<AppStore>()((set, get) => {
     assetBlobs: {},
     tools: {},
     warnings: [],
+    anchoredTo: defaultSource,
 
     setSource: (patch) => set(({ recipe }) => ({ recipe: { ...recipe, source: { ...recipe.source, ...patch } } })),
 
@@ -90,8 +105,23 @@ export const useStore = create<AppStore>()((set, get) => {
       return hash;
     },
 
-    loadRecipe: (recipe, assetBlobs, warnings) => set({ recipe, assetBlobs, warnings }),
+    loadRecipe: (recipe, assetBlobs, warnings) => set({ recipe, assetBlobs, warnings, anchoredTo: recipe.source }),
 
     dismissWarnings: () => set({ warnings: [] }),
+
+    applyRemap: (from, to, remap) =>
+      set(({ recipe, anchoredTo }) =>
+        anchoredTo === from ? { anchoredTo: to, recipe: { ...recipe, steps: remapSteps(recipe.steps, remap) } } : {},
+      ),
+
+    async reconcile() {
+      // Loop in case the Source changes again while it's being laid out.
+      for (;;) {
+        const { recipe, anchoredTo } = get();
+        const remap = await remapBetween(anchoredTo, recipe.source);
+        if (!remap) return get().recipe;
+        get().applyRemap(anchoredTo, recipe.source, remap);
+      }
+    },
   };
 });

@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import type { z } from 'zod';
+import type { Remap } from './remap';
 import type { Rng } from './rng';
 
 /** What a Manipulation produces. Raster always; vector when it has one. */
@@ -63,6 +64,13 @@ export interface ManipulationDefinition<
   toolsSchema: TS;
   /** Deterministic given its context. Used by the editor and for replay/export. */
   render(ctx: RenderContext<z.output<PS>, z.output<SS>>): Promise<Output>;
+  /**
+   * Move State along with the text when the Source changes, so effects stay on
+   * their letters. Must keep the order of what it keeps (render's randomness
+   * may depend on it) and may drop effects whose letters were deleted. Without
+   * it, State stays where it is.
+   */
+  remapState?(state: z.output<SS>, remap: Remap): z.output<SS>;
   Component: ComponentType<EditorProps<z.output<PS>, z.output<SS>, z.output<TS>>>;
 }
 
@@ -77,6 +85,7 @@ export interface Manipulation {
   stateSchema: z.ZodObject;
   toolsSchema: z.ZodObject;
   render(ctx: RenderContext<Values, Values>): Promise<Output>;
+  remapState?(state: Values, remap: Remap): Values;
   Component: ComponentType<EditorProps<Values, Values, Values>>;
 }
 

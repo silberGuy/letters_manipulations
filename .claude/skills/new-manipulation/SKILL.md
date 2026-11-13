@@ -50,7 +50,8 @@ Then add it to `MANIPULATIONS` in `src/manipulations/index.ts`. That file checks
   - Use the field helpers in `src/core/fields.ts` for Params and Tool settings, because they carry the UI hints in `.meta()`.
   - Supported control types: number, boolean, enum, colour, point, image. Any other type throws at startup; to support a new one, extend `describeFields` and `ControlsPanel`.
   - Every field in all three schemas needs a default, because `schema.parse({})` must produce the initial values.
-- **Coordinates in State** are normalized to the Step's input: `x / input.width`, `y / input.height`, and sizes relative to `input.width`.
+- **Coordinates in State** are in the Step's input pixels, and so are sizes. Don't normalize by `input.width`: the input resizes whenever the text changes.
+- **`remapState(state, remap)`**: implement it when State holds positions, so effects follow their letters when the Source text changes (see `src/core/remap.ts`). For a list of effects, use `remapItems(items, remap, { samples, dropAbove, move })`: give each item's sample points, the share of them on deleted letters above which it's dropped, and how a kept item moves (multiply lengths by `remap.scale`). It keeps the order of the items it keeps. Seed each item's randomness from a stable `id` stored on it (`rng.fork(\`item-${id}\`)`), not from its index, so dropping one item doesn't reshuffle the rest.
 - **Output size** may differ from the input (grow to fit rather than clip). If it does, a custom editor has to map pointer coordinates back to input space.
 - **Ink convention.** The Source is black ink on transparent paper, with alpha as the coverage. Mask-style effects should read `coverage(input)` and write with `inkFromCoverage()` from `src/core/raster.ts`. All effects must still accept arbitrary RGBA input, since a future chain may feed them colour.
 - **Helpers** to reuse:

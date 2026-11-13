@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Updater } from '../core/manipulation';
-import { renderInput } from '../core/pipeline';
+import { remapSteps, renderInput } from '../core/pipeline';
 import type { Recipe } from '../core/recipe';
+import { remapBetween } from '../core/remap';
 import { getManipulation } from '../manipulations';
 import { assetResolver } from '../store/assets';
 import { useStore } from '../store/store';
 
 type Values = Record<string, unknown>;
 
-/** The input to step `stepIndex`. Keeps the previous input on screen while recomputing. */
+/**
+ * The input to step `stepIndex`. Keeps the previous input on screen while
+ * recomputing. When the Source changed, moves State along with the text at the
+ * same moment the new input appears.
+ */
 function useStepInput(recipe: Recipe, stepIndex: number) {
   const [input, setInput] = useState<ImageData | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -17,14 +22,16 @@ function useStepInput(recipe: Recipe, stepIndex: number) {
 
   useEffect(() => {
     let cancelled = false;
-    renderInput(recipe, stepIndex, assetResolver).then(
-      (raster) => {
-        if (cancelled) return;
-        setInput(raster);
-        setError(null);
-      },
-      (e) => !cancelled && setError(e instanceof Error ? e : new Error(String(e))),
-    );
+    (async () => {
+      const from = useStore.getState().anchoredTo;
+      const remap = await remapBetween(from, recipe.source);
+      const steps = remap ? remapSteps(recipe.steps, remap) : recipe.steps;
+      const raster = await renderInput({ source: recipe.source, steps }, stepIndex, assetResolver);
+      if (cancelled) return;
+      if (remap) useStore.getState().applyRemap(from, recipe.source, remap);
+      setInput(raster);
+      setError(null);
+    })().catch((e) => !cancelled && setError(e instanceof Error ? e : new Error(String(e))));
     return () => {
       cancelled = true;
     };

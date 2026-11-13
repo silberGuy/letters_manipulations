@@ -3,13 +3,14 @@ import { z } from 'zod';
 import { numberField } from '../core/fields';
 import { defineManipulation, type EditorProps, type RenderContext } from '../core/manipulation';
 import { cloneRaster } from '../core/raster';
+import { remapItems } from '../core/remap';
 import { useRender } from '../core/useRender';
 import { OutputStatus } from '../ui/OutputStatus';
 import { RasterView, type ImagePoint } from '../ui/RasterView';
 
 const paramsSchema = z.object({});
 
-/** Holes in input-normalized coordinates; r is relative to input width. */
+/** Holes in input pixels. */
 const stateSchema = z.object({
   holes: z.array(z.object({ x: z.number(), y: z.number(), r: z.number().positive() })).default([]),
 });
@@ -27,9 +28,7 @@ async function render({ input, state }: RenderContext<Params, State>) {
   const out = cloneRaster(input);
   const { width: w, height: h, data } = out;
   for (const hole of state.holes) {
-    const cx = hole.x * w;
-    const cy = hole.y * h;
-    const r = hole.r * w;
+    const { x: cx, y: cy, r } = hole;
     const x0 = Math.max(0, Math.floor(cx - r - 1));
     const x1 = Math.min(w - 1, Math.ceil(cx + r + 1));
     const y0 = Math.max(0, Math.floor(cy - r - 1));
@@ -60,7 +59,7 @@ function HoleEditor({ input, params, state, setState, tools, seed, assets }: Edi
         onPointerDown={(p) =>
           setState((s) => ({
             ...s,
-            holes: [...s.holes, { x: p.x / input.width, y: p.y / input.height, r: tools.size / 2 / input.width }],
+            holes: [...s.holes, { x: p.x, y: p.y, r: tools.size / 2 }],
           }))
         }
         overlay={
@@ -84,11 +83,20 @@ function HoleEditor({ input, params, state, setState, tools, seed, assets }: Edi
 
 export const hole = defineManipulation({
   id: 'hole',
-  version: 1,
+  version: 2,
   label: 'Hole',
   paramsSchema,
   stateSchema,
   toolsSchema,
   render,
+  // A hole goes with its letter, and away with it.
+  remapState: (state, remap) => ({
+    ...state,
+    holes: remapItems(state.holes, remap, {
+      samples: (h) => [h],
+      dropAbove: 0.5,
+      move: (h, [{ to }]) => ({ x: to.x, y: to.y, r: h.r * remap.scale }),
+    }),
+  }),
   Component: HoleEditor,
 });

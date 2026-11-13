@@ -2,13 +2,15 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { z } from "zod";
 import { blurMargin, gaussianBlur } from "../core/blur";
 import { booleanField, numberField } from "../core/fields";
+import { candidatesAround } from "../core/candidates";
 import {
 	defineManipulation,
 	type EditorProps,
 	type RenderContext,
 } from "../core/manipulation";
 import { context2d, rasterToCanvas } from "../core/raster";
-import type { Rng } from "../core/rng";
+import { remapItems, type Remap } from "../core/remap";
+import { randomSeed, type Rng } from "../core/rng";
 import { useRender } from "../core/useRender";
 import { OutputStatus } from "../ui/OutputStatus";
 import { RasterView, type ImagePoint } from "../ui/RasterView";
@@ -112,14 +114,16 @@ const acidSchema = z.object({
 });
 
 /**
- * Presses in input-normalized coordinates. `duration` is how long, in seconds,
- * the pointer stayed at that press (dwell time). Each press carries the acid
- * settings it was made with.
+ * Presses in input pixels. `duration` is how long, in seconds, the pointer
+ * stayed at that press (dwell time). Each press carries the acid settings it
+ * was made with. `id` picks the press's random stream, so removing one press
+ * doesn't change the others.
  */
 const stateSchema = z.object({
 	presses: z
 		.array(
 			acidSchema.extend({
+				id: z.number().int().optional(),
 				x: z.number(),
 				y: z.number(),
 				duration: z.number().nonnegative(),
@@ -279,10 +283,12 @@ function distanceField(
 /**
  * The bubbles of one press, in draw order.
  *
- * Candidate bubbles are a Poisson process in time over the *whole* image:
- * each draws its birth time, position and radius from `rng`, whatever the
- * press's duration. A candidate becomes a bubble if it lands on ink the front
- * had already reached at its birth time. Because the stream of candidates
+ * Candidate bubbles are a Poisson process in time around the press (see
+ * candidatesAround): each draws its birth time, position and radius from
+ * `rng`, whatever the press's duration. They're laid out in the press's own
+ * frame, so when the press moves with its letter, its bubbles move with it.
+ * A candidate becomes a bubble if it lands on ink the front had already
+ * reached at its birth time. Because the stream of candidates
  * doesn't depend on the duration, a longer press only appends bubbles to a
  * shorter one's list — so the live preview grows smoothly instead of
  * reshuffling every frame.
@@ -302,34 +308,27 @@ function pressBubbles(
 	const maxR = Math.max(params.minRadius, params.maxRadius);
 	const duration = press.duration;
 
-	const field = distanceField(
-		input,
-		press.x * W,
-		press.y * H,
-		speed * Math.sqrt(duration),
-		paperSlowdown,
-	);
-	// Candidates per second over the whole image, at the initial spawn rate.
+	const maxDist = speed * Math.sqrt(duration);
+	const field = distanceField(input, press.x, press.y, maxDist, paperSlowdown);
 	// The decaying rate is applied by thinning (keeping each candidate with
 	// probability rate(t) / spawnRate), which keeps generation prefix-stable.
-	const rate = (spawnRate / 1000) * W * H;
+	const candidates = candidatesAround(
+		rng,
+		press.x,
+		press.y,
+		maxDist + 1,
+		spawnRate / 1000,
+		duration,
+	);
 	const bubbles: Bubble[] = [];
 
-	let t = 0;
-	for (;;) {
-		// Draw every value of the candidate up front, so accepting or rejecting it
-		// never shifts the draws of later candidates.
-		t += -Math.log(1 - rng.next()) / rate;
-		const x = rng.range(0, W);
-		const y = rng.range(0, H);
-		const sizeDraw = rng.next();
-		const keep = rng.next();
-		if (t > duration || bubbles.length >= MAX_BUBBLES_PER_PRESS) break;
-
+	for (const { t, x, y, sizeDraw, keep } of candidates) {
+		if (bubbles.length >= MAX_BUBBLES_PER_PRESS) break;
 		if (keep >= 2 ** (-t / SPAWN_HALF_LIFE)) continue;
 		const rMax = minR + sizeDraw * (maxR - minR) * 2 ** (-t / RADIUS_HALF_LIFE);
 		const ix = Math.floor(x);
 		const iy = Math.floor(y);
+		if (ix < 0 || iy < 0 || ix >= W || iy >= H) continue;
 		const p = (iy * W + ix) * 4;
 		if (a[p + 3] < INK_ALPHA) continue;
 		const fx = ix - field.x0;
@@ -364,7 +363,7 @@ function allBubbles(
 	// One independent stream per press, so editing or adding a press never
 	// changes the bubbles of the others.
 	return state.presses.flatMap((press, i) =>
-		pressBubbles(input, press, params, rng.fork(`press-${i}`)),
+		pressBubbles(input, press, params, rng.fork(`press-${press.id ?? i}`)),
 	);
 }
 
@@ -744,13 +743,53 @@ async function render({
 	return { raster, svg };
 }
 
+/** Points a press's acid may reach: its center, and rings at half and full reach. */
+function pressSamples(press: Press): { x: number; y: number }[] {
+	const reach = press.speed * Math.sqrt(press.duration);
+	const out = [{ x: press.x, y: press.y }];
+	for (const f of [0.5, 1]) {
+		for (let k = 0; k < 8; k++) {
+			const a = (k * Math.PI) / 4;
+			out.push({
+				x: press.x + Math.cos(a) * reach * f,
+				y: press.y + Math.sin(a) * reach * f,
+			});
+		}
+	}
+	return out;
+}
+
+/**
+ * A press goes with its letter, its bubbles with it. A press whose acid
+ * reached mostly letters that were deleted goes away with them.
+ */
+function remapState(state: State, remap: Remap): State {
+	return {
+		...state,
+		presses: remapItems(state.presses, remap, {
+			samples: pressSamples,
+			dropAbove: 0.5,
+			// The first sample is the press's center.
+			move: (press, [{ to }]) => ({
+				...press,
+				x: to.x,
+				y: to.y,
+				speed: press.speed * remap.scale,
+			}),
+		}),
+	};
+}
+
 // ---------------------------------------------------------------------------
 // Editor
 
 interface Gesture {
 	done: Press[];
-	/** Current press in image pixels; `start` is a performance.now() timestamp. */
-	current: { x: number; y: number; start: number };
+	/**
+	 * Current press in image pixels; `start` is a performance.now() timestamp,
+	 * `id` the press's id, fixed so the preview matches the committed press.
+	 */
+	current: { x: number; y: number; start: number; id: number };
 	/** Acid settings at the start of the gesture, copied into each of its presses. */
 	acid: Tools;
 }
@@ -781,8 +820,9 @@ function BubblingAcidEditor({
 			...g.done,
 			{
 				...g.acid,
-				x: g.current.x / input.width,
-				y: g.current.y / input.height,
+				id: g.current.id,
+				x: g.current.x,
+				y: g.current.y,
 				duration: (now - g.current.start) / 1000,
 			},
 		];
@@ -802,7 +842,7 @@ function BubblingAcidEditor({
 		e.currentTarget.setPointerCapture(e.pointerId);
 		gesture.current = {
 			done: [],
-			current: { ...p, start: performance.now() },
+			current: { ...p, start: performance.now(), id: randomSeed() },
 			acid: tools,
 		};
 		spread.current = null;
@@ -847,7 +887,7 @@ function BubblingAcidEditor({
 		const now = performance.now();
 		if (insideSpread(g, p, now)) return;
 		g.done = snapshot(now);
-		g.current = { ...p, start: now };
+		g.current = { ...p, start: now, id: randomSeed() };
 		spread.current = null;
 	};
 
@@ -891,11 +931,12 @@ function BubblingAcidEditor({
 
 export const bubblingAcid = defineManipulation({
 	id: "bubbling-acid",
-	version: 1,
+	version: 2,
 	label: "Bubbling Acid",
 	paramsSchema,
 	stateSchema,
 	toolsSchema,
 	render,
+	remapState,
 	Component: BubblingAcidEditor,
 });

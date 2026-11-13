@@ -7,7 +7,8 @@ import {
 	type RenderContext,
 } from "../core/manipulation";
 import { PushCanvas, type Ellipse } from "../core/push";
-import type { Rng } from "../core/rng";
+import { remapItems, type Remap } from "../core/remap";
+import { randomSeed, type Rng } from "../core/rng";
 import { useRender } from "../core/useRender";
 import { OutputStatus } from "../ui/OutputStatus";
 import { RasterView, type ImagePoint } from "../ui/RasterView";
@@ -102,16 +103,17 @@ const toolsSchema = z.object({
 
 /**
  * A Cut: the stroke the user dragged, with the Tool settings it was made with.
- * Points are input-normalized; `t` is seconds since the Cut started, and
- * `releasedAt` is when the pointer was let go. Lengths (width, taper,
- * positionJitter) are relative to input width; spacing is a fraction of the
- * Cut's width.
+ * Points and lengths (width, taper, positionJitter) are in input pixels; `t` is
+ * seconds since the Cut started, and `releasedAt` is when the pointer was let
+ * go. Spacing is a fraction of the Cut's width. `id` picks the Cut's random
+ * stream, so removing one Cut doesn't change the others.
  *
  * `now` is editor-only: it shows a live Cut as it looks at that moment, still
  * growing. Committed Cuts never have it and render settled, as at
  * releasedAt + AFTER_GROW_TIME.
  */
 const cutSchema = z.object({
+	id: z.number().int().optional(),
 	points: z.array(
 		z.object({ x: z.number(), y: z.number(), t: z.number().nonnegative() }),
 	),
@@ -146,8 +148,8 @@ const easeOut = (x: number) => 1 - (1 - x) ** 3;
  * The Cut's ellipses in pixels, in stroke order. `a` is the across-stroke
  * radius, `b` the along-stroke one.
  */
-function cutEllipses(cut: Cut, W: number, H: number, rng: Rng): Ellipse[] {
-	const pts = cut.points.map((p) => ({ x: p.x * W, y: p.y * H, t: p.t }));
+function cutEllipses(cut: Cut, rng: Rng): Ellipse[] {
+	const pts = cut.points;
 	if (pts.length < 2) return [];
 	const arc = [0];
 	for (let i = 1; i < pts.length; i++) {
@@ -174,10 +176,10 @@ function cutEllipses(cut: Cut, W: number, H: number, rng: Rng): Ellipse[] {
 		};
 	};
 
-	const width = cut.width * W;
+	const width = cut.width;
 	const spacing = Math.max(1, cut.spacing * width);
-	const taper = cut.taper * W;
-	const jitterPx = cut.positionJitter * W;
+	const taper = cut.taper;
+	const jitterPx = cut.positionJitter;
 	// Half-window for the tangent, so a wobbly hand still gives a steady direction.
 	const h = Math.max(spacing, width * 0.25);
 	const end = cut.now ?? cut.releasedAt + AFTER_GROW_TIME;
@@ -243,12 +245,7 @@ async function render({
 }: RenderContext<Params, State>) {
 	const canvas = new PushCanvas(input);
 	state.cuts.forEach((cut, index) => {
-		const ellipses = cutEllipses(
-			cut,
-			input.width,
-			input.height,
-			rng.fork(`cut ${index}`),
-		);
+		const ellipses = cutEllipses(cut, rng.fork(`cut ${cut.id ?? index}`));
 		// Test for ink against the image as it was when this Cut began: its own
 		// ellipses overlap, so testing as it goes would land each center in the
 		// previous hole. Ink pushed out by earlier Cuts can still be torn.
@@ -259,6 +256,40 @@ async function render({
 	});
 	// No native SVG: export traces the raster, only when asked.
 	return { raster: canvas.toImageData(PUSHED_MIN_ALPHA) };
+}
+
+/**
+ * A Cut follows the letter it started on (or, if that one's gone, the first
+ * surviving letter along it) as one rigid piece, scaled with the font size.
+ * Moving its points separately would stretch it, changing how it grows. A Cut
+ * that was mostly on deleted letters goes with them.
+ */
+function remapState(state: State, remap: Remap): State {
+	const k = remap.scale;
+	return {
+		...state,
+		cuts: remapItems(state.cuts, remap, {
+			samples: (cut) => cut.points,
+			dropAbove: 0.5,
+			move: (cut, located) => {
+				const i = located.findIndex((l) => !l.deleted);
+				if (i < 0) return cut;
+				const from = cut.points[i];
+				const to = located[i].to;
+				return {
+					...cut,
+					points: cut.points.map((p) => ({
+						x: to.x + (p.x - from.x) * k,
+						y: to.y + (p.y - from.y) * k,
+						t: p.t,
+					})),
+					width: cut.width * k,
+					taper: cut.taper * k,
+					positionJitter: cut.positionJitter * k,
+				};
+			},
+		}),
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +303,8 @@ interface Gesture {
 	/** Seconds since start when released, or null while held. */
 	releasedAt: number | null;
 	tools: Tools;
+	/** The Cut's id, fixed for the gesture so the preview matches the committed Cut. */
+	id: number;
 }
 
 function TearEditor({
@@ -296,21 +329,19 @@ function TearEditor({
 	);
 	const result = useRender(render, input, params, shownState, seed, assets);
 
-	const W = input.width;
-	const H = input.height;
-
 	/** The gesture as a Cut; pass `now` to show it mid-growth (editor only). */
 	const toCut = (g: Gesture, releasedAt: number, now?: number): Cut => ({
-		points: g.points.map((p) => ({ x: p.x / W, y: p.y / H, t: p.t })),
+		id: g.id,
+		points: g.points.map((p) => ({ ...p })),
 		releasedAt,
 		...(now === undefined ? {} : { now }),
-		width: g.tools.width / W,
+		width: g.tools.width,
 		aspect: g.tools.aspect,
 		radiusJitter: g.tools.radiusJitter,
 		tiltJitter: g.tools.tiltJitter,
-		positionJitter: g.tools.positionJitter / W,
+		positionJitter: g.tools.positionJitter,
 		spacing: g.tools.spacing / 100,
-		taper: g.tools.taper / W,
+		taper: g.tools.taper,
 		growTime: g.tools.growTime,
 		reach: g.tools.reach,
 	});
@@ -385,6 +416,7 @@ function TearEditor({
 			start: now,
 			releasedAt: null,
 			tools,
+			id: randomSeed(),
 		};
 		setLive(snapshot(gesture.current, now));
 		setAnimating(true);
@@ -447,11 +479,12 @@ function TearEditor({
 
 export const tear = defineManipulation({
 	id: "tear",
-	version: 1,
+	version: 2,
 	label: "Tear",
 	paramsSchema,
 	stateSchema,
 	toolsSchema,
 	render,
+	remapState,
 	Component: TearEditor,
 });
