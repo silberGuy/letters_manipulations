@@ -36,6 +36,10 @@ _Avoid_: Params, UI state
 A point the user held down in a Manipulation's editor, stored in State with how long it was held; render grows its effect from the point for that duration.
 _Avoid_: Click, tap, touch
 
+**Cut**:
+A stroke the user dragged in a Manipulation's editor, stored in State as timed points; render opens ellipses along it as they were reached in time.
+_Avoid_: Slash, line, path
+
 **Asset**:
 A user-supplied file (e.g. an uploaded image) that a Recipe refers to by content hash and carries with it.
 _Avoid_: Attachment, upload, resource

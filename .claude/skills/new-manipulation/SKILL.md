@@ -21,7 +21,7 @@ Before writing code, settle these (ask about anything the request leaves open):
    - **State** is data produced by interacting with the canvas (e.g. points, strokes, holes).
    - **Tool settings** shape the interaction only (e.g. brush size). Their effect must be recorded *into* State (each stroke stores its own width), never read by render.
 3. **Randomness.** If render needs any, it uses `rng`.
-4. **Vector output.** Decide whether render produces a native SVG (it may call `vectorize()` itself), or leaves export to fall back to the traced SVG. If building the SVG is costly (e.g. it traces), return it as a function: it's only called on export, never for the live preview.
+4. **Vector output.** If render returns no `svg`, the SVG Export (`src/ui/TopBar.tsx`) traces the raster Output with `vectorize()`, and only when the user exports. So "raster plus a traced SVG" needs no code and no question to the user. Only ask when the Manipulation could produce a *native* SVG (it may call `vectorize()` itself, e.g. to trace the input and add vector shapes on top). If building the SVG is costly (e.g. it traces), return it as a function: it's only called on export, never for the live preview.
 
 ## 2. Write `src/manipulations/<id>.tsx`
 

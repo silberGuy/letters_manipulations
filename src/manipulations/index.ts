@@ -4,8 +4,9 @@ import { bubblingAcid } from './bubbling-acid';
 import { goo } from './goo';
 import { hole } from './hole';
 import { skew } from './skew';
+import { tear } from './tear';
 
-export const MANIPULATIONS: Manipulation[] = [goo, skew, hole, bubblingAcid];
+export const MANIPULATIONS: Manipulation[] = [goo, skew, hole, bubblingAcid, tear];
 
 // Fail at startup, not mid-session, if a Manipulation's schemas are unusable.
 for (const m of MANIPULATIONS) {
