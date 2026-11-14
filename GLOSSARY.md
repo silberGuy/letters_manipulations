@@ -36,6 +36,10 @@ _Avoid_: Params, UI state
 A point the user held down in a Manipulation's editor, stored in State with how long it was held; render grows its effect from the point for that duration.
 _Avoid_: Click, tap, touch
 
+**Blade**:
+One grass stroke the Grass Manipulation grows out of a letter's edge: a tapered curve pointing away from the ink, with a random tilt and bend.
+_Avoid_: Hair, spike, line
+
 **Cut**:
 A stroke the user dragged in a Manipulation's editor, stored in State as timed points; render opens ellipses along it as they were reached in time.
 _Avoid_: Slash, line, path
