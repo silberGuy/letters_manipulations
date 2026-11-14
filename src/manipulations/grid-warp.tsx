@@ -330,6 +330,8 @@ function GridWarpEditor({
 	const [selection, setSelection] = useState<Set<number>>(() => new Set());
 	const [drag, setDrag] = useState<Drag | null>(null);
 	const [hoverNode, setHoverNode] = useState<number | null>(null);
+	/** Whether the pointer is over the canvas; the grid hides otherwise. */
+	const [hovering, setHovering] = useState(false);
 	/** Screen px per image px, read from the overlay. */
 	const [zoom, setZoom] = useState(1);
 
@@ -399,6 +401,7 @@ function GridWarpEditor({
 	const onMove = (p: ImagePoint, e: PointerEvent<SVGSVGElement>) => {
 		const z = readZoom(e);
 		const q = toInput(p);
+		if (!hovering) setHovering(true);
 		if (!drag) {
 			setHoverNode(nodeAt(q, z));
 			return;
@@ -494,6 +497,8 @@ function GridWarpEditor({
 		);
 	}
 
+	const showGrid = hovering || drag !== null || selection.size > 0;
+
 	const box =
 		drag?.kind === "box" ? (
 			<rect
@@ -520,8 +525,12 @@ function GridWarpEditor({
 				onPointerDown={onDown}
 				onPointerMove={onMove}
 				onPointerUp={onUp}
-				onPointerLeave={() => setHoverNode(null)}
+				onPointerLeave={() => {
+					setHoverNode(null);
+					setHovering(false);
+				}}
 				overlay={
+					showGrid &&
 					// Overlay is drawn in input pixels; the Output may have grown up/left.
 					<g
 						transform={`translate(${-origin.x} ${-origin.y})`}
