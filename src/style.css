@@ -635,10 +635,13 @@ details[open] > .summary::before {
   white-space: nowrap;
 }
 
-.step-tab-delete {
+/* A transparent square hit area around the X, the full height of the tab */
+.step-tab .step-tab-delete {
   display: flex;
   align-items: center;
-  padding-left: 0 !important;
+  justify-content: center;
+  width: 2em;
+  padding: 0;
 }
 
 .step-tab-delete:hover {
@@ -647,6 +650,9 @@ details[open] > .summary::before {
 
 .step-add {
   flex: none;
+  width: 2em;
+  height: 2em;
+  padding: 0;
 }
 
 .step-arrow {
@@ -654,8 +660,10 @@ details[open] > .summary::before {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 1.5em;
-  padding: var(--pad-btn);
+  /* A transparent square hit area around the arrow / + */
+  width: 2em;
+  height: 2em;
+  padding: 0;
 }
 
 .step-arrow-hover,
