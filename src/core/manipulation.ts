@@ -20,6 +20,14 @@ export interface AssetResolver {
   getImageData(hash: string): Promise<ImageData>;
 }
 
+/**
+ * `draft` renders fast for the live preview while the user interacts; `final`
+ * is the Recipe's real Output (export, chained Steps, and the preview once
+ * interaction settles). A Manipulation may ignore it; one that reads it must
+ * give the same picture in both, only at different quality.
+ */
+export type RenderQuality = 'draft' | 'final';
+
 export interface RenderContext<P, S> {
   /** RGBA input. Not to be mutated. */
   input: ImageData;
@@ -27,6 +35,7 @@ export interface RenderContext<P, S> {
   state: S;
   rng: Rng;
   assets: AssetResolver;
+  quality: RenderQuality;
 }
 
 export type Updater<T> = T | ((prev: T) => T);

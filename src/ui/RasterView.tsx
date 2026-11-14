@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
+import { rasterToCanvas } from '../core/raster';
 import { useStore } from '../store/store';
 
 export interface ImagePoint {
@@ -41,18 +42,32 @@ export function RasterView({ image, overlay, cursor, onPointerDown, onPointerMov
     return () => ro.disconnect();
   }, [image === null]);
 
+  // Screen px per image px. Scale down to fit, never up.
+  const scale =
+    image && box.width && box.height ? Math.min(1, box.width / image.width, box.height / image.height) : 1;
+  // Device px per image px for the canvas backing store. Shrinking here with
+  // high-quality smoothing looks much better than letting CSS shrink it.
+  const pixelScale = Math.min(1, scale * (window.devicePixelRatio || 1));
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !image) return;
-    canvas.width = image.width;
-    canvas.height = image.height;
-    canvas.getContext('2d')!.putImageData(image, 0, 0);
-  }, [image]);
+    const ctx = canvas.getContext('2d')!;
+    if (pixelScale >= 1) {
+      canvas.width = image.width;
+      canvas.height = image.height;
+      ctx.putImageData(image, 0, 0);
+      return;
+    }
+    canvas.width = Math.max(1, Math.round(image.width * pixelScale));
+    canvas.height = Math.max(1, Math.round(image.height * pixelScale));
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(rasterToCanvas(image), 0, 0, canvas.width, canvas.height);
+  }, [image, pixelScale]);
 
   if (!image) return null;
 
-  // Screen px per image px. Scale down to fit, never up.
-  const scale = box.width && box.height ? Math.min(1, box.width / image.width, box.height / image.height) : 1;
   // The whole container, expressed in image pixel coordinates.
   const viewW = box.width / scale || image.width;
   const viewH = box.height / scale || image.height;

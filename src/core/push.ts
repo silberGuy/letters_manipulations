@@ -1,4 +1,5 @@
-import { createRaster } from "./raster";
+import type { RenderQuality } from "./manipulation";
+import { createRaster, samplerFor } from "./raster";
 
 /**
  * Pushing: holes that open like holes in incompressible rubber. The material
@@ -24,36 +25,68 @@ const smoothstep = (e0: number, e1: number, x: number) => {
 	return t * t * (3 - 2 * t);
 };
 
-/** An image being pushed: open holes in order, then read it back as ImageData. */
+/**
+ * An image being pushed: open holes in order, then read it back as ImageData.
+ *
+ * Holes don't move pixels. Each output pixel keeps a note of where in the
+ * input it comes from (a map) and how much of it survives (a mask), and each
+ * hole updates those notes. The input is sampled once, in toImageData, so the
+ * ink is resampled (and softened) once no matter how many holes overlap.
+ */
 export class PushCanvas {
 	readonly width: number;
 	readonly height: number;
-	/** Premultiplied RGBA as floats. */
-	private buf: Float32Array;
+	private input: ImageData;
+	private quality: RenderQuality;
+	/** Where each pixel comes from, in input pixel-center coordinates. */
+	private mapX: Float32Array;
+	private mapY: Float32Array;
+	/** How much of each pixel survives (0..1): holes clear it. */
+	private mask: Float32Array;
 	/** 1 where any hole has moved the pixel. */
 	private pushed: Uint8Array;
-	private px = new Float32Array(4);
+	private m = new Float32Array(3);
 
-	/** Copies `input`; never mutates it. */
-	constructor(input: ImageData) {
-		const { width: W, height: H, data } = input;
+	/** Reads `input`; never mutates it. `quality` picks the final sampling kernel. */
+	constructor(input: ImageData, quality: RenderQuality) {
+		const { width: W, height: H } = input;
 		this.width = W;
 		this.height = H;
-		this.buf = new Float32Array(W * H * 4);
+		this.input = input;
+		this.quality = quality;
+		this.mapX = new Float32Array(W * H);
+		this.mapY = new Float32Array(W * H);
+		this.mask = new Float32Array(W * H).fill(1);
 		this.pushed = new Uint8Array(W * H);
-		for (let i = 0; i < W * H; i++) {
-			const a = data[i * 4 + 3] / 255;
-			this.buf[i * 4] = (data[i * 4] / 255) * a;
-			this.buf[i * 4 + 1] = (data[i * 4 + 1] / 255) * a;
-			this.buf[i * 4 + 2] = (data[i * 4 + 2] / 255) * a;
-			this.buf[i * 4 + 3] = a;
+		for (let y = 0; y < H; y++) {
+			for (let x = 0; x < W; x++) {
+				this.mapX[y * W + x] = x;
+				this.mapY[y * W + x] = y;
+			}
 		}
 	}
 
-	/** Alpha (0..1) at image point (x, y), bilinearly sampled. */
+	/** Alpha (0..1) of the pushed image at image point (x, y), bilinearly sampled. */
 	alphaAt(x: number, y: number): number {
-		this.sample(x - 0.5, y - 0.5, this.px);
-		return this.px[3];
+		const m = this.m;
+		this.lookup(x - 0.5, y - 0.5, m);
+		if (m[2] <= 0) return 0;
+		const { width: W, height: H, data } = this.input;
+		const x0 = Math.floor(m[0]);
+		const y0 = Math.floor(m[1]);
+		const fx = m[0] - x0;
+		const fy = m[1] - y0;
+		let a = 0;
+		for (let j = 0; j < 2; j++) {
+			const yy = y0 + j;
+			if (yy < 0 || yy >= H) continue;
+			for (let i = 0; i < 2; i++) {
+				const xx = x0 + i;
+				if (xx < 0 || xx >= W) continue;
+				a += data[(yy * W + xx) * 4 + 3] * (j ? fy : 1 - fy) * (i ? fx : 1 - fx);
+			}
+		}
+		return (a / 255) * m[2];
 	}
 
 	/**
@@ -64,7 +97,7 @@ export class PushCanvas {
 	 * monotonic (no folds).
 	 */
 	open(e: Ellipse, strength: number) {
-		const { width: W, height: H, buf, pushed } = this;
+		const { width: W, height: H, mapX, mapY, mask, pushed } = this;
 		const cos = Math.cos(e.angle);
 		const sin = Math.sin(e.angle);
 		const A = e.a * e.reach;
@@ -78,13 +111,15 @@ export class PushCanvas {
 		if (x0 > x1 || y0 > y1) return;
 
 		const bw = x1 - x0 + 1;
-		const tmp = new Float32Array(bw * (y1 - y0 + 1) * 4);
-		const px = this.px;
+		// New map and mask for the box: [mapX, mapY, mask] per pixel.
+		const tmp = new Float32Array(bw * (y1 - y0 + 1) * 3);
+		const m = this.m;
 		const R = e.reach;
 
 		for (let y = y0; y <= y1; y++) {
 			for (let x = x0; x <= x1; x++) {
-				const t = ((y - y0) * bw + (x - x0)) * 4;
+				const t = ((y - y0) * bw + (x - x0)) * 3;
+				const k = y * W + x;
 				const dx = x + 0.5 - e.cx;
 				const dy = y + 0.5 - e.cy;
 				const u = dx * cos + dy * sin;
@@ -92,16 +127,14 @@ export class PushCanvas {
 				const qx = u / e.a;
 				const qy = v / e.b;
 				const rho = Math.hypot(qx, qy);
-				const k = (y * W + x) * 4;
+				tmp[t] = mapX[k];
+				tmp[t + 1] = mapY[k];
 				if (rho >= R) {
-					tmp[t] = buf[k];
-					tmp[t + 1] = buf[k + 1];
-					tmp[t + 2] = buf[k + 2];
-					tmp[t + 3] = buf[k + 3];
+					tmp[t + 2] = mask[k];
 					continue;
 				}
-				pushed[y * W + x] = 1;
-				if (rho < 1e-6) continue; // Center of the hole: transparent.
+				pushed[k] = 1;
+				if (rho < 1e-6) continue; // Center of the hole: cleared (mask 0).
 				// Signed distance to the hole's edge in pixels (first order), for anti-aliasing.
 				const grad = Math.hypot(qx / e.a, qy / e.b) / rho;
 				const cov = Math.min(1, Math.max(0, (rho - 1) / grad + 0.5));
@@ -112,46 +145,67 @@ export class PushCanvas {
 				const f = rhoIn / rho;
 				const su = u * f;
 				const sv = v * f;
-				this.sample(
+				this.lookup(
 					e.cx + su * cos - sv * sin - 0.5,
 					e.cy + su * sin + sv * cos - 0.5,
-					px,
+					m,
 				);
-				tmp[t] = px[0] * cov;
-				tmp[t + 1] = px[1] * cov;
-				tmp[t + 2] = px[2] * cov;
-				tmp[t + 3] = px[3] * cov;
+				tmp[t] = m[0];
+				tmp[t + 1] = m[1];
+				tmp[t + 2] = m[2] * cov;
 			}
 		}
 
 		for (let y = y0; y <= y1; y++) {
-			const row = (y - y0) * bw * 4;
-			buf.set(tmp.subarray(row, row + bw * 4), (y * W + x0) * 4);
+			for (let x = x0; x <= x1; x++) {
+				const t = ((y - y0) * bw + (x - x0)) * 3;
+				const k = y * W + x;
+				mapX[k] = tmp[t];
+				mapY[k] = tmp[t + 1];
+				mask[k] = tmp[t + 2];
+			}
 		}
 	}
 
 	/**
-	 * The result. Pushed pixels fainter than `minPushedAlpha` (0..1) are
-	 * removed, so smeared ink doesn't leave a haze.
+	 * The result: the input, sampled once through the map. Pushed pixels fainter
+	 * than `minPushedAlpha` (0..1) are removed, so smeared ink doesn't leave a haze.
 	 */
 	toImageData(minPushedAlpha: number): ImageData {
-		const { width: W, height: H, buf, pushed } = this;
+		const { width: W, height: H, mapX, mapY, mask, pushed } = this;
+		const src = this.input.data;
+		const sample = samplerFor(this.quality);
 		const out = createRaster(W, H);
 		const o = out.data;
+		const minAlpha = minPushedAlpha * 255;
 		for (let i = 0; i < W * H; i++) {
-			const a = buf[i * 4 + 3];
-			if (a <= 0 || (pushed[i] && a < minPushedAlpha)) continue;
-			o[i * 4] = Math.round((buf[i * 4] / a) * 255);
-			o[i * 4 + 1] = Math.round((buf[i * 4 + 1] / a) * 255);
-			o[i * 4 + 2] = Math.round((buf[i * 4 + 2] / a) * 255);
-			o[i * 4 + 3] = Math.round(a * 255);
+			const p = i * 4;
+			if (!pushed[i]) {
+				o[p] = src[p];
+				o[p + 1] = src[p + 1];
+				o[p + 2] = src[p + 2];
+				o[p + 3] = src[p + 3];
+				continue;
+			}
+			if (mask[i] <= 0) continue;
+			sample(src, W, H, mapX[i], mapY[i], o, p);
+			const a = o[p + 3] * mask[i];
+			if (a < minAlpha) {
+				o[p] = o[p + 1] = o[p + 2] = o[p + 3] = 0;
+				continue;
+			}
+			o[p + 3] = Math.round(a);
 		}
 		return out;
 	}
 
-	/** Bilinear sample at (x, y) in pixel-center coordinates; transparent outside. */
-	private sample(x: number, y: number, out: Float32Array) {
-		const { width: W, height: H, buf } = this;
+	/**
+	 * The map and mask at (x, y) in pixel-center coordinates, bilinearly
+	 * interpolated. Outside the image nothing was ever pushed, so the map is the
+	 * identity there (the input is transparent outside anyway).
+	 */
+	private lookup(x: number, y: number, out: Float32Array) {
+		const { width: W, height: H, mapX, mapY, mask } = this;
 		const x0 = Math.floor(x);
 		const y0 = Math.floor(y);
 		const fx = x - x0;
@@ -159,17 +213,20 @@ export class PushCanvas {
 		out.fill(0);
 		for (let j = 0; j < 2; j++) {
 			const yy = y0 + j;
-			if (yy < 0 || yy >= H) continue;
 			const wy = j ? fy : 1 - fy;
 			for (let i = 0; i < 2; i++) {
 				const xx = x0 + i;
-				if (xx < 0 || xx >= W) continue;
 				const w = wy * (i ? fx : 1 - fx);
-				const k = (yy * W + xx) * 4;
-				out[0] += buf[k] * w;
-				out[1] += buf[k + 1] * w;
-				out[2] += buf[k + 2] * w;
-				out[3] += buf[k + 3] * w;
+				if (xx < 0 || yy < 0 || xx >= W || yy >= H) {
+					out[0] += xx * w;
+					out[1] += yy * w;
+					out[2] += w;
+					continue;
+				}
+				const k = yy * W + xx;
+				out[0] += mapX[k] * w;
+				out[1] += mapY[k] * w;
+				out[2] += mask[k] * w;
 			}
 		}
 	}

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { enumField, numberField } from '../core/fields';
 import { defineManipulation, type RenderContext } from '../core/manipulation';
-import { createRaster, sampleBilinear } from '../core/raster';
+import { createRaster, samplerFor } from '../core/raster';
 import { PreviewEditor } from './PreviewEditor';
 
 const paramsSchema = z.object({
@@ -19,7 +19,8 @@ type Params = z.output<typeof paramsSchema>;
  * canvas resample, which blurs a soft halo around the shape and differs
  * between browsers.
  */
-async function render({ input, params }: RenderContext<Params, unknown>) {
+async function render({ input, params, quality }: RenderContext<Params, unknown>) {
+  const sample = samplerFor(quality);
   const t = Math.tan((params.angle * Math.PI) / 180);
   const { width: w, height: h, data: src } = input;
   const horizontal = params.axis === 'horizontal';
@@ -36,7 +37,7 @@ async function render({ input, params }: RenderContext<Params, unknown>) {
       const cy = y + 0.5;
       const sx = horizontal ? cx - shift + t * cy : cx;
       const sy = horizontal ? cy : cy - shift + t * cx;
-      sampleBilinear(src, w, h, sx - 0.5, sy - 0.5, dst, (y * W + x) * 4);
+      sample(src, w, h, sx - 0.5, sy - 0.5, dst, (y * W + x) * 4);
     }
   }
   return { raster: out };

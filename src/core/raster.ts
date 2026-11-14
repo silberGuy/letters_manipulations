@@ -97,6 +97,65 @@ export function sampleBilinear(
   dst[at + 3] = a;
 }
 
+/** Catmull-Rom weight for a tap at distance d (|d| < 2). */
+function catmullRom(d: number): number {
+  const x = Math.abs(d);
+  if (x < 1) return 1.5 * x * x * x - 2.5 * x * x + 1;
+  if (x < 2) return -0.5 * x * x * x + 2.5 * x * x - 4 * x + 2;
+  return 0;
+}
+
+/**
+ * Bicubic (Catmull-Rom) sample, same contract as `sampleBilinear`. Sharper:
+ * edges stay crisp instead of softening by about half a pixel per resample.
+ */
+export function sampleBicubic(
+  src: Uint8ClampedArray,
+  w: number,
+  h: number,
+  sx: number,
+  sy: number,
+  dst: Uint8ClampedArray,
+  at: number,
+) {
+  const x0 = Math.floor(sx);
+  const y0 = Math.floor(sy);
+  const fx = sx - x0;
+  const fy = sy - y0;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let a = 0;
+  for (let j = -1; j <= 2; j++) {
+    const yy = y0 + j;
+    if (yy < 0 || yy >= h) continue;
+    const wy = catmullRom(j - fy);
+    for (let i = -1; i <= 2; i++) {
+      const xx = x0 + i;
+      if (xx < 0 || xx >= w) continue;
+      const s = (yy * w + xx) * 4;
+      const al = src[s + 3] * wy * catmullRom(i - fx);
+      r += src[s] * al;
+      g += src[s + 1] * al;
+      b += src[s + 2] * al;
+      a += al;
+    }
+  }
+  // The kernel's negative lobes can overshoot; clamp alpha, and colour via Uint8Clamped.
+  if (a <= 0) return;
+  dst[at] = r / a;
+  dst[at + 1] = g / a;
+  dst[at + 2] = b / a;
+  dst[at + 3] = Math.min(255, a);
+}
+
+export type Sampler = typeof sampleBilinear;
+
+/** Bilinear for draft renders (fast), bicubic for final ones (sharp). */
+export function samplerFor(quality: 'draft' | 'final'): Sampler {
+  return quality === 'final' ? sampleBicubic : sampleBilinear;
+}
+
 export function rasterToCanvas(image: ImageData): OffscreenCanvas {
   const canvas = new OffscreenCanvas(image.width, image.height);
   canvas.getContext('2d')!.putImageData(image, 0, 0);

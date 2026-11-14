@@ -7,7 +7,7 @@ import { createRng } from './rng';
 
 export function runStep(step: Step, input: ImageData, assets: AssetResolver): Promise<Output> {
   const m = getManipulation(step.manipulationId);
-  return m.render({ input, params: step.params, state: step.state, rng: createRng(step.seed), assets });
+  return m.render({ input, params: step.params, state: step.state, rng: createRng(step.seed), assets, quality: 'final' });
 }
 
 /** The input for step `stepIndex`: the Source, run through every earlier Step. */

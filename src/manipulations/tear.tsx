@@ -242,8 +242,9 @@ async function render({
 	params,
 	state,
 	rng,
+	quality,
 }: RenderContext<Params, State>) {
-	const canvas = new PushCanvas(input);
+	const canvas = new PushCanvas(input, quality);
 	state.cuts.forEach((cut, index) => {
 		const ellipses = cutEllipses(cut, rng.fork(`cut ${cut.id ?? index}`));
 		// Test for ink against the image as it was when this Cut began: its own

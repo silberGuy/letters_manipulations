@@ -351,8 +351,9 @@ async function render({
 	params,
 	state,
 	rng,
+	quality,
 }: RenderContext<Params, State>) {
-	const canvas = new PushCanvas(input);
+	const canvas = new PushCanvas(input, quality);
 	for (const b of allBubbles(input, params, state, rng)) {
 		if (b.r <= 0) continue;
 		canvas.open(

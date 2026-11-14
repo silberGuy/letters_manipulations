@@ -6,7 +6,7 @@ import {
 	type EditorProps,
 	type RenderContext,
 } from "../core/manipulation";
-import { createRaster, sampleBilinear } from "../core/raster";
+import { createRaster, samplerFor } from "../core/raster";
 import { remapItems } from "../core/remap";
 import { useRender } from "../core/useRender";
 import { OutputStatus } from "../ui/OutputStatus";
@@ -183,7 +183,13 @@ function invBilinear(
  * quad of its four (possibly moved) corners. Where quads fold over each
  * other, the cell earlier in reading order wins.
  */
-async function render({ input, params, state }: RenderContext<Params, State>) {
+async function render({
+	input,
+	params,
+	state,
+	quality,
+}: RenderContext<Params, State>) {
+	const sample = samplerFor(quality);
 	const { width: w, height: h, data: src } = input;
 	const g = gridOf(w, h, params.cellSize);
 	const { xs, ys } = positionsOf(g, state.moves);
@@ -229,7 +235,7 @@ async function render({ input, params, state }: RenderContext<Params, State>) {
 					);
 					if (!ok) continue;
 					written[p] = 1;
-					sampleBilinear(
+					sample(
 						src,
 						w,
 						h,
