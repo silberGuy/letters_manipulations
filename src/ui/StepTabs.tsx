@@ -25,10 +25,10 @@ function ManipulationPicker({ className, title, onPick, children }: {
   );
 }
 
-function TrashIcon() {
+function CloseIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-      <path d="M1 3h10M4 3V1h4v2M2.5 3l.75 8h5.5l.75-8M5 5v4M7 5v4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M2 2l8 8M10 2l-8 8" fill="none" stroke="currentColor" strokeWidth="1.5" />
     </svg>
   );
 }
@@ -55,7 +55,7 @@ export function StepTabs() {
             </button>
             {steps.length > 1 && (
               <button type="button" className="step-tab-delete" title="Delete step" onClick={() => removeStep(i)}>
-                <TrashIcon />
+                <CloseIcon />
               </button>
             )}
           </div>
