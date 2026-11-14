@@ -11,7 +11,7 @@ const paramsSchema = z.object({
 		min: 0,
 		max: 30,
 		step: 0.5,
-		default: 10,
+		default: 14,
 	}),
 	threshold: numberField({
 		label: "Threshold",
