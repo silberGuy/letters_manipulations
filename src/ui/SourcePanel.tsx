@@ -8,7 +8,7 @@ export function SourcePanel() {
   const setSource = useStore((s) => s.setSource);
 
   return (
-    <aside className="panel border-right">
+    <aside className="panel">
       <h2>Source</h2>
       <label className="control">
         <span className="control-label muted">Text</span>

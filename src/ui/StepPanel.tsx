@@ -1,14 +1,14 @@
 import { useMemo } from 'react';
 import { describeFields } from '../core/fields';
 import { randomSeed } from '../core/rng';
-import { getManipulation } from '../manipulations';
+import { getManipulation, MANIPULATIONS } from '../manipulations';
 import { useStore } from '../store/store';
 import { ControlsPanel } from './ControlsPanel';
 
 export function StepPanel({ stepIndex }: { stepIndex: number }) {
   const step = useStore((s) => s.recipe.steps[stepIndex]);
   const storedTools = useStore((s) => s.tools[step.manipulationId]);
-  const { setParams, setTools, setSeed, resetStep } = useStore.getState();
+  const { setParams, setTools, setSeed, resetStep, selectManipulation } = useStore.getState();
   const m = getManipulation(step.manipulationId);
   const tools = useMemo(() => storedTools ?? m.toolsSchema.parse({}), [storedTools, m]);
   const hasParams = describeFields(m.paramsSchema, m.id).length > 0;
@@ -16,7 +16,20 @@ export function StepPanel({ stepIndex }: { stepIndex: number }) {
 
   return (
     <aside className="panel border-left">
-      <h2>{m.label}</h2>
+      <h2>
+        <select
+          className="input step-manipulation"
+          aria-label="Manipulation"
+          value={m.id}
+          onChange={(e) => selectManipulation(stepIndex, e.target.value)}
+        >
+          {MANIPULATIONS.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.label}
+            </option>
+          ))}
+        </select>
+      </h2>
       {hasParams && (
         <section>
           <h3 className="label muted">Params</h3>

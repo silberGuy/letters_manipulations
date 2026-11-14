@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Updater } from '../core/manipulation';
-import { remapSteps, renderInput } from '../core/pipeline';
+import { remapSteps, renderInput, renderRecipe } from '../core/pipeline';
 import type { Recipe } from '../core/recipe';
 import { remapBetween } from '../core/remap';
 import { getManipulation } from '../manipulations';
 import { assetResolver } from '../store/assets';
 import { useStore } from '../store/store';
+import { RasterView } from './RasterView';
 
 type Values = Record<string, unknown>;
 
@@ -41,7 +42,74 @@ function useStepInput(recipe: Recipe, stepIndex: number) {
   return { input, error };
 }
 
+/** The Recipe's Output, view-only. Brings State up to date with the Source first. */
+function FinalView() {
+  const recipe = useStore((s) => s.recipe);
+  const [image, setImage] = useState<ImageData | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [pending, setPending] = useState(true);
+  const key = JSON.stringify([recipe.source, recipe.steps]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPending(true);
+    (async () => {
+      const output = await renderRecipe(await useStore.getState().reconcile(), assetResolver);
+      if (cancelled) return;
+      setImage(output.raster);
+      setError(null);
+      setPending(false);
+    })().catch((e) => {
+      if (cancelled) return;
+      setError(e instanceof Error ? e : new Error(String(e)));
+      setPending(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return (
+    <>
+      <RasterView image={image} />
+      {error ? (
+        <div className="output-status error">Render failed: {error.message}</div>
+      ) : (
+        pending && <div className="output-status">Rendering…</div>
+      )}
+    </>
+  );
+}
+
+/** Floats under the top bar on every tab but the last. */
+function FinalToggle() {
+  const showFinal = useStore((s) => s.showFinal);
+  const setShowFinal = useStore((s) => s.setShowFinal);
+  return (
+    <div className="final-toggle row">
+      <button type="button" className={`btn${showFinal ? ' btn-outline' : ''}`} onClick={() => setShowFinal(false)}>
+        Up to this step
+      </button>
+      <button type="button" className={`btn${showFinal ? '' : ' btn-outline'}`} onClick={() => setShowFinal(true)}>
+        Final result
+      </button>
+    </div>
+  );
+}
+
 export function Editor({ stepIndex }: { stepIndex: number }) {
+  const isLast = useStore((s) => stepIndex === s.recipe.steps.length - 1);
+  const showFinal = useStore((s) => s.showFinal) && !isLast;
+  return (
+    <main className="editor">
+      {!isLast && <FinalToggle />}
+      {showFinal ? <FinalView /> : <StepEditor key={stepIndex} stepIndex={stepIndex} />}
+    </main>
+  );
+}
+
+function StepEditor({ stepIndex }: { stepIndex: number }) {
   const recipe = useStore((s) => s.recipe);
   const storedTools = useStore((s) => s.tools[recipe.steps[stepIndex].manipulationId]);
   const step = recipe.steps[stepIndex];
@@ -53,12 +121,16 @@ export function Editor({ stepIndex }: { stepIndex: number }) {
   const setState = useCallback((u: Updater<Values>) => useStore.getState().setState(stepIndex, u), [stepIndex]);
 
   return (
-    <main className="editor">
-      {error && <div className="output-status error">Source failed: {error.message}</div>}
+    <>
+      {error && (
+        <div className="output-status error">
+          {stepIndex === 0 ? 'Source' : 'Input'} failed: {error.message}
+        </div>
+      )}
       {input ? (
         <m.Component
-          // Remount on Manipulation switch so editors don't share local state.
-          key={m.id}
+          // Remount on Step or Manipulation switch so editors don't share local state.
+          key={`${stepIndex}:${m.id}`}
           input={input}
           params={step.params}
           setParams={setParams}
@@ -69,8 +141,8 @@ export function Editor({ stepIndex }: { stepIndex: number }) {
           assets={assetResolver}
         />
       ) : (
-        !error && <div className="output-status">Loading font…</div>
+        !error && <div className="output-status">{stepIndex === 0 ? 'Loading font…' : 'Rendering earlier steps…'}</div>
       )}
-    </main>
+    </>
   );
 }

@@ -6,7 +6,7 @@ import {
 	type EditorProps,
 	type RenderContext,
 } from "../core/manipulation";
-import { createRaster } from "../core/raster";
+import { createRaster, sampleBilinear } from "../core/raster";
 import { remapItems } from "../core/remap";
 import { useRender } from "../core/useRender";
 import { OutputStatus } from "../ui/OutputStatus";
@@ -229,7 +229,7 @@ async function render({ input, params, state }: RenderContext<Params, State>) {
 					);
 					if (!ok) continue;
 					written[p] = 1;
-					sample(
+					sampleBilinear(
 						src,
 						w,
 						h,
@@ -243,43 +243,6 @@ async function render({ input, params, state }: RenderContext<Params, State>) {
 		}
 	}
 	return { raster: out };
-}
-
-/** Bilinear sample with premultiplied alpha (transparent outside), written to dst[at]. */
-function sample(
-	src: Uint8ClampedArray,
-	w: number,
-	h: number,
-	sx: number,
-	sy: number,
-	dst: Uint8ClampedArray,
-	at: number,
-) {
-	const x0 = Math.floor(sx),
-		y0 = Math.floor(sy);
-	const fx = sx - x0,
-		fy = sy - y0;
-	let r = 0,
-		gr = 0,
-		b = 0,
-		a = 0;
-	for (let k = 0; k < 4; k++) {
-		const xx = x0 + (k & 1),
-			yy = y0 + (k >> 1);
-		if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
-		const wt = (k & 1 ? fx : 1 - fx) * (k >> 1 ? fy : 1 - fy);
-		const s = (yy * w + xx) * 4;
-		const al = src[s + 3] * wt;
-		r += src[s] * al;
-		gr += src[s + 1] * al;
-		b += src[s + 2] * al;
-		a += al;
-	}
-	if (a <= 0) return;
-	dst[at] = r / a;
-	dst[at + 1] = gr / a;
-	dst[at + 2] = b / a;
-	dst[at + 3] = a;
 }
 
 // The Output origin of each rendered raster, so the editor maps pointer and

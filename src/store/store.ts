@@ -23,8 +23,19 @@ export interface AppStore {
    * recipe.source while a new Source is laid out; applyRemap catches it up.
    */
   anchoredTo: Source;
+  /** Index of the Step whose tab is open. UI only, not part of the Recipe. */
+  selectedStep: number;
+  /** Show the Recipe's Output instead of the selected Step's editor. Resets on every tab change. */
+  showFinal: boolean;
 
+  selectStep(stepIndex: number): void;
+  /** Insert a new Step of Manipulation `id` at `stepIndex` and select it. */
+  addStep(stepIndex: number, id: string): void;
+  /** Remove a Step. A Recipe always keeps at least one. */
+  removeStep(stepIndex: number): void;
+  setShowFinal(show: boolean): void;
   setSource(patch: Partial<Source>): void;
+  /** Switch a Step to another Manipulation: Params and State reset, the seed stays. */
   selectManipulation(stepIndex: number, id: string): void;
   setParams(stepIndex: number, update: Updater<Values>): void;
   setState(stepIndex: number, update: Updater<Values>): void;
@@ -75,10 +86,32 @@ export const useStore = create<AppStore>()((set, get) => {
     warnings: [],
     showExportBounds: false,
     anchoredTo: defaultSource,
+    selectedStep: 0,
+    showFinal: false,
+
+    selectStep: (selectedStep) => set({ selectedStep, showFinal: false }),
+
+    addStep: (i, id) =>
+      set(({ recipe }) => {
+        const steps = [...recipe.steps];
+        steps.splice(i, 0, createStep(getManipulation(id)));
+        return { recipe: { ...recipe, steps }, selectedStep: i, showFinal: false };
+      }),
+
+    removeStep: (i) =>
+      set(({ recipe, selectedStep }) => {
+        if (recipe.steps.length <= 1) return {};
+        const steps = recipe.steps.filter((_, j) => j !== i);
+        // Deleting the open tab selects the one before it (or the new first tab).
+        const shift = i < selectedStep || (i === selectedStep && i > 0);
+        return { recipe: { ...recipe, steps }, selectedStep: shift ? selectedStep - 1 : selectedStep, showFinal: false };
+      }),
+
+    setShowFinal: (showFinal) => set({ showFinal }),
 
     setSource: (patch) => set(({ recipe }) => ({ recipe: { ...recipe, source: { ...recipe.source, ...patch } } })),
 
-    selectManipulation: (i, id) => updateStep(i, () => createStep(getManipulation(id))),
+    selectManipulation: (i, id) => updateStep(i, (s) => createStep(getManipulation(id), s.seed)),
 
     setParams: (i, update) => updateStep(i, (s) => ({ ...s, params: resolve(update, s.params) })),
 
@@ -109,7 +142,15 @@ export const useStore = create<AppStore>()((set, get) => {
       return hash;
     },
 
-    loadRecipe: (recipe, assetBlobs, warnings) => set({ recipe, assetBlobs, warnings, anchoredTo: recipe.source }),
+    loadRecipe: (recipe, assetBlobs, warnings) =>
+      set({
+        recipe,
+        assetBlobs,
+        warnings,
+        anchoredTo: recipe.source,
+        selectedStep: recipe.steps.length - 1,
+        showFinal: false,
+      }),
 
     dismissWarnings: () => set({ warnings: [] }),
 
