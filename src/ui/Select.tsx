@@ -6,6 +6,8 @@ export interface SelectOption {
   label: string;
   /** Consecutive options with the same group are listed under one heading. */
   group?: string;
+  /** Shown at the end of the option in the open list (not on the trigger). */
+  preview?: ReactNode;
 }
 
 interface Props {
@@ -136,7 +138,8 @@ export function Select({ value, options, onChange, placeholder, title, className
         onPointerEnter={() => setActive(i)}
         onClick={() => pick(i)}
       >
-        {o.label}
+        <span className="select-option-label">{o.label}</span>
+        {o.preview}
       </li>,
     );
   });

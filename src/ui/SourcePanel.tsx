@@ -14,7 +14,7 @@ export function SourcePanel() {
         <span className="control-label muted">Text</span>
         <textarea className="input source-text" dir="auto" rows={3} value={source.text} onChange={(e) => setSource({ text: e.target.value })} />
       </label>
-      <FontPicker value={source.font} onChange={(font) => setSource({ font })} />
+      <FontPicker value={source.font} onChange={(font) => setSource({ font })} sampleText={source.text} />
       <ControlsPanel schema={sourceTypeSchema} owner="source" values={source}
         onChange={(v) => setSource(v as Partial<Source>)}
       />

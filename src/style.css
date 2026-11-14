@@ -234,9 +234,19 @@ textarea {
 }
 
 .select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--gap) * 4);
   padding: var(--pad-field);
   white-space: nowrap;
   cursor: pointer;
+}
+
+/* The Source's first letters in each font, at the end of the font list's options */
+.font-sample {
+  font-size: 1.3em;
+  line-height: 1;
 }
 
 .select-option.selected {
