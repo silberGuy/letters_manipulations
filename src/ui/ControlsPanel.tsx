@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { z } from 'zod';
 import { describeFields, type AssetRef, type Field, type Point } from '../core/fields';
 import { useStore } from '../store/store';
+import { Select } from './Select';
 
 type Values = Record<string, unknown>;
 
@@ -64,13 +65,11 @@ function Control({ field, value, onChange }: { field: Field; value: unknown; onC
         <input className="checkbox" type="checkbox" checked={value as boolean} onChange={(e) => onChange(e.target.checked)} />
       )}
       {field.kind === 'enum' && (
-        <select className="input" value={value as string} onChange={(e) => onChange(e.target.value)}>
-          {field.options.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
+        <Select
+          value={value as string}
+          options={field.options.map((o) => ({ value: o, label: o }))}
+          onChange={onChange}
+        />
       )}
       {field.kind === 'color' && (
         <input className="swatch" type="color" value={value as string} onChange={(e) => onChange(e.target.value)} />

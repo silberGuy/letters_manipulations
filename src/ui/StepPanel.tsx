@@ -4,6 +4,7 @@ import { randomSeed } from '../core/rng';
 import { getManipulation, MANIPULATIONS } from '../manipulations';
 import { useStore } from '../store/store';
 import { ControlsPanel } from './ControlsPanel';
+import { Select } from './Select';
 
 export function StepPanel({ stepIndex }: { stepIndex: number }) {
   const step = useStore((s) => s.recipe.steps[stepIndex]);
@@ -17,18 +18,13 @@ export function StepPanel({ stepIndex }: { stepIndex: number }) {
   return (
     <aside className="panel border-left">
       <h2>
-        <select
-          className="input step-manipulation"
+        <Select
+          className="step-manipulation"
           aria-label="Manipulation"
           value={m.id}
-          onChange={(e) => selectManipulation(stepIndex, e.target.value)}
-        >
-          {MANIPULATIONS.map((x) => (
-            <option key={x.id} value={x.id}>
-              {x.label}
-            </option>
-          ))}
-        </select>
+          options={MANIPULATIONS.map((x) => ({ value: x.id, label: x.label }))}
+          onChange={(id) => selectManipulation(stepIndex, id)}
+        />
       </h2>
       {hasParams && (
         <section>

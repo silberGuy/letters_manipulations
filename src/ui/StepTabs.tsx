@@ -1,12 +1,11 @@
 import { Fragment, type ReactNode } from 'react';
 import { getManipulation, MANIPULATIONS } from '../manipulations';
 import { useStore } from '../store/store';
+import { Select } from './Select';
 
-/**
- * A control that shows `children` and opens the Manipulation picker on click.
- * Uses a transparent native <select> on top, so the list isn't clipped by the
- * scrolling tab strip.
- */
+const MANIPULATION_OPTIONS = MANIPULATIONS.map((m) => ({ value: m.id, label: m.label }));
+
+/** Shows `children` as a button that opens the Manipulation list. */
 function ManipulationPicker({ className, title, onPick, children }: {
   className: string;
   title: string;
@@ -14,25 +13,15 @@ function ManipulationPicker({ className, title, onPick, children }: {
   children: ReactNode;
 }) {
   return (
-    <label className={`picker ${className}`} title={title}>
-      {children}
-      <select
-        value=""
-        aria-label={title}
-        onChange={(e) => {
-          if (e.target.value) onPick(e.target.value);
-        }}
-      >
-        <option value="" disabled>
-          {title}
-        </option>
-        {MANIPULATIONS.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <Select
+      className={className}
+      title={title}
+      aria-label={title}
+      value={null}
+      options={MANIPULATION_OPTIONS}
+      onChange={onPick}
+      trigger={children}
+    />
   );
 }
 

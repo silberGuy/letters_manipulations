@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { FontRef } from '../core/recipe';
 import { FONT_LOADERS } from '../fonts';
 import type { FontFamilyOption } from '../fonts/loader';
+import { Select } from './Select';
 
 interface Family extends FontFamilyOption {
   loader: string;
@@ -18,10 +19,10 @@ export function FontPicker({ value, onChange }: { value: FontRef; onChange(ref: 
       ),
     [],
   );
-  const groups = useMemo(() => {
+  const familyOptions = useMemo(() => {
     const byGroup = new Map<string, Family[]>();
     for (const f of families) byGroup.set(f.group, [...(byGroup.get(f.group) ?? []), f]);
-    return byGroup;
+    return [...byGroup].flatMap(([group, fams]) => fams.map((f) => ({ value: f.key, label: f.label, group })));
   }, [families]);
 
   const current = families.find((f) => f.loader === value.loader && f.variants.some((v) => sameArgs(v.args, value.args)));
@@ -41,33 +42,23 @@ export function FontPicker({ value, onChange }: { value: FontRef; onChange(ref: 
     <div className="controls">
       <label className="control">
         <span className="control-label muted">Font</span>
-        <select className="input" value={current?.key ?? ''} onChange={(e) => pickFamily(e.target.value)}>
-          {!current && <option value="">(unlisted font)</option>}
-          {[...groups].map(([group, fams]) => (
-            <optgroup key={group} label={group}>
-              {fams.map((f) => (
-                <option key={f.key} value={f.key}>
-                  {f.label}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+        <Select
+          value={current?.key ?? null}
+          options={familyOptions}
+          onChange={pickFamily}
+          placeholder="(unlisted font)"
+        />
       </label>
       {current && current.variants.length > 1 && (
         <label className="control">
           <span className="control-label muted">Weight</span>
-          <select
-            className="input"
-            value={currentVariant?.label}
-            onChange={(e) =>
-              onChange({ loader: current.loader, args: current.variants.find((v) => v.label === e.target.value)!.args })
+          <Select
+            value={currentVariant?.label ?? null}
+            options={current.variants.map((v) => ({ value: v.label, label: v.label }))}
+            onChange={(label) =>
+              onChange({ loader: current.loader, args: current.variants.find((v) => v.label === label)!.args })
             }
-          >
-            {current.variants.map((v) => (
-              <option key={v.label}>{v.label}</option>
-            ))}
-          </select>
+          />
         </label>
       )}
     </div>
