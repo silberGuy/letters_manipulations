@@ -10,7 +10,7 @@ preloadFrames(WALK, WORK);
 /** Frames per second, walking and working. */
 const WORKER_FPS = 7;
 /** A Worker's size on screen, in px. The frames are 274×284, so this stays sharp up to ~135px on a 2× screen. */
-const WORKER_SIZE = 80;
+const WORKER_SIZE = 64;
 /** Walking speed, in screen px per second. */
 const WALK_SPEED = 260;
 
