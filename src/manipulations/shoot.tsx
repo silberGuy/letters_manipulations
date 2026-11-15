@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import { numberField } from "../core/fields";
+import { enumField, numberField } from "../core/fields";
 import {
 	defineManipulation,
 	type EditorProps,
@@ -25,7 +25,10 @@ const paramsSchema = z.object({
 	}),
 });
 
-/** Holes in input pixels. `id` seeds the hole's cracks. */
+/**
+ * Shots in input pixels. `id` seeds the shot's cracks (and a spray's
+ * pellets). A spray is one entry; its pellets are derived in render.
+ */
 const stateSchema = z.object({
 	holes: z
 		.array(
@@ -34,12 +37,17 @@ const stateSchema = z.object({
 				y: z.number(),
 				r: z.number().positive(),
 				id: z.number().int().optional(),
+				kind: z.enum(["single", "spray"]).optional(),
 			}),
 		)
 		.default([]),
 });
 
 const toolsSchema = z.object({
+	shotType: enumField(["single", "spray"], {
+		label: "Shot type",
+		default: "single",
+	}),
 	size: numberField({ label: "Hole size (px)", min: 2, max: 100, default: 15 }),
 	fireRate: numberField({
 		label: "Fire rate (shots/s)",
@@ -47,7 +55,7 @@ const toolsSchema = z.object({
 		max: 20,
 		step: 0.5,
 		default: 6,
-		hint: "Hold to keep shooting",
+		hint: "Hold to keep shooting. Spray fires slower",
 	}),
 });
 
@@ -58,6 +66,13 @@ const HOLE_AT_MS = 80;
 /** Hole size (px) up to which the shake stays at its minimum. */
 const SHAKE_BASE_SIZE = 80;
 
+/** A spray's pellets land within this many hole radii of the aim. */
+const SPRAY_SPREAD = 5;
+/** Spray fires at this fraction of the fire rate. */
+const SPRAY_RATE = 0.3;
+/** Spray shakes this many times harder. */
+const SPRAY_SHAKE = 3;
+
 /** Shakes in progress; the page's overflow is hidden while any run. */
 let activeShakes = 0;
 
@@ -65,12 +80,12 @@ let activeShakes = 0;
  * A short vertical "camera" shake of the whole interface. Hides the page's
  * overflow meanwhile so the moving app can't flash a scrollbar.
  */
-function shake(el: HTMLElement | null, holeSize: number) {
+function shake(el: HTMLElement | null, holeSize: number, strength = 1) {
 	if (!el) return;
 	activeShakes++;
 	document.body.style.overflow = "hidden";
 	// Bigger holes, bigger shake; never less than the default size's.
-	const k = Math.max(1, holeSize / SHAKE_BASE_SIZE);
+	const k = Math.max(1, holeSize / SHAKE_BASE_SIZE) * strength;
 	const animation = el.animate(
 		[0, -7, 5, -3, 2, 0].map((y) => ({ translate: `0 ${y * k}px` })),
 		{ duration: SHAKE_MS, easing: "ease-out" },
@@ -256,15 +271,13 @@ async function render({
 	const out = cloneRaster(input);
 	const { width: w, height: h, data } = out;
 	const mask = new CutMask(w, h);
-	state.holes.forEach((hole, i) => {
-		const { x: cx, y: cy, r } = hole;
+	// One hole with its cracks.
+	const punch = (cx: number, cy: number, r: number, holeRng: Rng) => {
 		mask.circle(cx, cy, r);
 		if (params.crackSize <= 0) return;
 		const size = params.crackSize * crackScale(r);
 		const width = Math.min(12, Math.max(1.5, r * 0.12));
-		for (const { angle, lines } of crackShapes(
-			rng.fork(`hole-${hole.id ?? i}`),
-		)) {
+		for (const { angle, lines } of crackShapes(holeRng)) {
 			// Start a little inside the edge so the crack joins the hole cleanly.
 			const sx = cx + Math.cos(angle) * (r - width);
 			const sy = cy + Math.sin(angle) * (r - width);
@@ -277,6 +290,27 @@ async function render({
 				for (let j = 1; j < pts.length; j++)
 					mask.taperedSegment(pts[j - 1], pts[j]);
 			}
+		}
+	};
+	state.holes.forEach((hole, i) => {
+		const shotRng = rng.fork(`hole-${hole.id ?? i}`);
+		if (hole.kind !== "spray") {
+			punch(hole.x, hole.y, hole.r, shotRng);
+			return;
+		}
+		// Pellets: clustered toward the aim, none past the spread.
+		const n = shotRng.int(6, 10);
+		for (let j = 0; j < n; j++) {
+			const a = shotRng.range(0, 2 * Math.PI);
+			const d =
+				hole.r * SPRAY_SPREAD * Math.min(1, Math.abs(shotRng.gaussian(0, 0.5)));
+			const pr = hole.r * shotRng.range(0.6, 1);
+			punch(
+				hole.x + Math.cos(a) * d,
+				hole.y + Math.sin(a) * d,
+				pr,
+				shotRng.fork(`pellet-${j}`),
+			);
 		}
 	});
 	for (let i = 0; i < mask.cover.length; i++) {
@@ -353,15 +387,22 @@ function ShootEditor({
 		[],
 	);
 
-	// A shot: the camera shakes, then the hole appears.
+	const spray = tools.shotType === "spray";
+
+	// A shot: the camera shakes, then the hole (or a spray's pellets) appears.
 	const shoot = (p: ImagePoint) => {
 		const r = tools.size / 2;
-		shake(useAppElement.getState().appElement, tools.size);
+		const kind = tools.shotType;
+		shake(
+			useAppElement.getState().appElement,
+			tools.size,
+			kind === "spray" ? SPRAY_SHAKE : 1,
+		);
 		const t = window.setTimeout(() => {
 			timers.current = timers.current.filter((x) => x !== t);
 			setState((s) => ({
 				...s,
-				holes: [...s.holes, { x: p.x, y: p.y, r, id: randomSeed() }],
+				holes: [...s.holes, { x: p.x, y: p.y, r, id: randomSeed(), kind }],
 			}));
 		}, HOLE_AT_MS);
 		timers.current.push(t);
@@ -375,7 +416,7 @@ function ShootEditor({
 		shoot(p);
 		autoFire.current = window.setInterval(
 			() => aim.current && shoot(aim.current),
-			1000 / tools.fireRate,
+			1000 / (tools.fireRate * (spray ? SPRAY_RATE : 1)),
 		);
 	};
 
@@ -396,7 +437,14 @@ function ShootEditor({
 				onPointerDown={startFiring}
 				onPointerUp={stopFiring}
 				overlay={
-					hover && <Crosshair x={hover.x} y={hover.y} r={tools.size / 2} />
+					hover && (
+						<Crosshair
+							x={hover.x}
+							y={hover.y}
+							// A spray aims with its spread.
+							r={(tools.size / 2) * (spray ? SPRAY_SPREAD : 1)}
+						/>
+					)
 				}
 			/>
 			<OutputStatus result={result} />
