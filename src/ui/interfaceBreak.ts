@@ -5,10 +5,15 @@
  * usable underneath, and they outlive the editor that set them off.
  */
 export interface InterfaceBreak {
-  /** How long it stays once drawn, before it starts repairing, in ms. */
+  /** How long it stays once formed, before it starts repairing, in ms. */
   holdMs: number;
-  /** Draw the break into its own container, which covers the viewport. */
+  /**
+   * Draw the break into its own container, which covers the viewport. A break
+   * may keep changing it (e.g. growing along with a gesture) until `formed`.
+   */
   draw(container: HTMLElement): void;
+  /** Resolves once the break stops forming; the hold starts then. Default: at once. */
+  formed?: Promise<void>;
   /**
    * Make it go away; may add temporary elements to the container. The
    * container is removed once this resolves. Default: fade out.
@@ -21,7 +26,8 @@ export const REPAIR_FADE_MS = 300;
 
 let layer: HTMLElement | null = null;
 
-function breakLayer(): HTMLElement {
+/** The layer all Interface Breaks are drawn in (e.g. to shake it with the interface). */
+export function breakLayer(): HTMLElement {
   if (!layer) {
     layer = document.createElement('div');
     layer.className = 'interface-breaks';
@@ -35,13 +41,15 @@ export function breakInterface(b: InterfaceBreak) {
   container.className = 'interface-break';
   breakLayer().append(container);
   b.draw(container);
-  window.setTimeout(async () => {
+  void (async () => {
     try {
+      await b.formed;
+      await new Promise((r) => window.setTimeout(r, b.holdMs));
       await (b.repair ?? fadeOut)(container);
     } finally {
       container.remove();
     }
-  }, b.holdMs);
+  })();
 }
 
 async function fadeOut(container: HTMLElement) {
@@ -100,10 +108,13 @@ export function imageGroup(
   return g;
 }
 
-/** An SVG path element with the given `d`, filled with the paper color. */
-export function paperPath(d: string): SVGPathElement {
+/**
+ * An SVG path element with the given `d`, filled with the ink color: holes in
+ * the interface are dark, as if it were a sheet over ink.
+ */
+export function inkPath(d: string): SVGPathElement {
   const path = document.createElementNS(SVG, 'path');
   path.setAttribute('d', d);
-  path.style.fill = 'var(--paper)';
+  path.style.fill = 'var(--ink)';
   return path;
 }

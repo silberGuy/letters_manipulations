@@ -19,7 +19,7 @@ import {
 	RasterView,
 	type ImagePoint,
 } from "../ui/RasterView";
-import { breakInterface, imageGroup, paperPath } from "../ui/interfaceBreak";
+import { breakInterface, imageGroup, inkPath } from "../ui/interfaceBreak";
 import { ScreenOverlay } from "../ui/ScreenOverlay";
 
 const paramsSchema = z.object({
@@ -358,7 +358,7 @@ function shootInterface(
 			(BREAK_HOLD_MS + hole.r * BREAK_HOLD_PER_PX) *
 			(hole.kind === "spray" ? SPRAY_BREAK_HOLD : 1),
 		draw: (container) =>
-			imageGroup(container, toScreen).append(paperPath(marksPath(marks))),
+			imageGroup(container, toScreen).append(inkPath(marksPath(marks))),
 	});
 }
 

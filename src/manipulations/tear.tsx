@@ -5,13 +5,25 @@ import {
 	defineManipulation,
 	type EditorProps,
 	type RenderContext,
+	type RenderQuality,
 } from "../core/manipulation";
 import { PushCanvas, type Ellipse } from "../core/push";
 import { remapItems, type Remap } from "../core/remap";
-import { randomSeed, type Rng } from "../core/rng";
+import { createRng, randomSeed, type Rng } from "../core/rng";
 import { useRender } from "../core/useRender";
 import { OutputStatus } from "../ui/OutputStatus";
-import { RasterView, type ImagePoint } from "../ui/RasterView";
+import { breakInterface, imageGroup, inkPath } from "../ui/interfaceBreak";
+import {
+	cropPixels,
+	snapshotInterface,
+	type InterfaceSnapshot,
+} from "../ui/snapshot";
+import {
+	imageToScreen,
+	isOnCanvas,
+	RasterView,
+	type ImagePoint,
+} from "../ui/RasterView";
 
 /** Min distance (px) between recorded points of a Cut. */
 const POINT_SPACING = 3;
@@ -294,6 +306,159 @@ function remapState(state: State, remap: Remap): State {
 }
 
 // ---------------------------------------------------------------------------
+// Interface Break
+
+/** How long a tear in the interface stays once it stops growing, in ms. */
+const BREAK_HOLD_MS = 1800;
+
+/** Ellipses as one SVG path. */
+function ellipsesPath(ellipses: Ellipse[]): string {
+	return ellipses
+		.map(({ cx, cy, angle, a, b }) => {
+			const dx = Math.cos(angle) * a;
+			const dy = Math.sin(angle) * a;
+			const deg = (angle * 180) / Math.PI;
+			return (
+				`M${cx + dx} ${cy + dy}A${a} ${b} ${deg} 0 1 ${cx - dx} ${cy - dy}` +
+				`A${a} ${b} ${deg} 0 1 ${cx + dx} ${cy + dy}Z`
+			);
+		})
+		.join("");
+}
+
+/**
+ * A Cut that left the Canvas tears the interface too: its ellipses off the
+ * Canvas (on it, only the ink tears) open in a snapshot of the interface with
+ * the same push as in the image, laid over the interface as a patch. The
+ * holes are dark, as if the interface were a sheet over ink, so the push
+ * shoves its lines around solid shapes, as a letter's edge is. Until the
+ * snapshot is ready, they're plain dark holes. It grows with the Cut until
+ * `settle` is called.
+ */
+interface InterfaceTear {
+	update(ellipses: Ellipse[], quality: RenderQuality): void;
+	settle(): void;
+}
+
+function tearInterface(
+	toScreen: DOMMatrixReadOnly,
+	canvas: DOMRectReadOnly,
+	snapshot: Promise<InterfaceSnapshot | null>,
+	pushStrength: number,
+): InterfaceTear {
+	// The Canvas in image px (no rotation, so a rect stays a rect).
+	const toImage = toScreen.inverse();
+	const p0 = toImage.transformPoint(new DOMPoint(canvas.left, canvas.top));
+	const p1 = toImage.transformPoint(new DOMPoint(canvas.right, canvas.bottom));
+	const path = inkPath("");
+	const patch = document.createElement("canvas");
+	patch.style.position = "absolute";
+	patch.style.display = "none";
+	patch.style.background = "var(--ink)";
+	let settle = () => {};
+	breakInterface({
+		holdMs: BREAK_HOLD_MS,
+		formed: new Promise<void>((r) => (settle = r)),
+		draw: (container) => {
+			imageGroup(container, toScreen, {
+				x: Math.min(p0.x, p1.x),
+				y: Math.min(p0.y, p1.y),
+				width: Math.abs(p1.x - p0.x),
+				height: Math.abs(p1.y - p0.y),
+			}).append(path);
+			container.append(patch);
+		},
+	});
+
+	// Image px → screen px is a uniform scale (the Canvas keeps the aspect).
+	const zoom = toScreen.a;
+	let snap: InterfaceSnapshot | null = null;
+	let last: { ellipses: Ellipse[]; quality: RenderQuality } | null = null;
+
+	const draw = (ellipses: Ellipse[], quality: RenderQuality) => {
+		if (!snap) {
+			path.setAttribute("d", ellipsesPath(ellipses));
+			return;
+		}
+		path.setAttribute("d", "");
+		const { pixels, scale } = snap;
+		// The ellipses off the Canvas, in snapshot px.
+		const k = zoom * scale;
+		const es: Ellipse[] = [];
+		for (const e of ellipses) {
+			const c = toScreen.transformPoint(new DOMPoint(e.cx, e.cy));
+			const onCanvas =
+				c.x >= canvas.left &&
+				c.x < canvas.right &&
+				c.y >= canvas.top &&
+				c.y < canvas.bottom;
+			if (onCanvas) continue;
+			es.push({
+				...e,
+				cx: (c.x - snap.x) * scale,
+				cy: (c.y - snap.y) * scale,
+				a: e.a * k,
+				b: e.b * k,
+			});
+		}
+		// The box the push reaches, clamped to the snapshot.
+		let x0 = Infinity;
+		let y0 = Infinity;
+		let x1 = -Infinity;
+		let y1 = -Infinity;
+		for (const e of es) {
+			const r = Math.max(e.a, e.b) * e.reach;
+			x0 = Math.min(x0, e.cx - r);
+			y0 = Math.min(y0, e.cy - r);
+			x1 = Math.max(x1, e.cx + r);
+			y1 = Math.max(y1, e.cy + r);
+		}
+		x0 = Math.max(0, Math.floor(x0));
+		y0 = Math.max(0, Math.floor(y0));
+		x1 = Math.min(pixels.width, Math.ceil(x1));
+		y1 = Math.min(pixels.height, Math.ceil(y1));
+		if (x1 <= x0 || y1 <= y0) {
+			patch.style.display = "none";
+			return;
+		}
+		const w = x1 - x0;
+		const h = y1 - y0;
+		const push = new PushCanvas(cropPixels(pixels, x0, y0, w, h), quality);
+		for (const e of es)
+			push.open({ ...e, cx: e.cx - x0, cy: e.cy - y0 }, pushStrength);
+		patch.width = w;
+		patch.height = h;
+		patch.getContext("2d")!.putImageData(push.toImageData(PUSHED_MIN_ALPHA), 0, 0);
+		// Placed in viewport px; the holes show ink; the Canvas is left alone.
+		const left = snap.x + x0 / scale;
+		const top = snap.y + y0 / scale;
+		patch.style.display = "block";
+		patch.style.left = `${left}px`;
+		patch.style.top = `${top}px`;
+		patch.style.width = `${w / scale}px`;
+		patch.style.height = `${h / scale}px`;
+		const cl = canvas.left - left;
+		const ct = canvas.top - top;
+		patch.style.clipPath =
+			`path(evenodd, "M-100000 -100000H100000V100000H-100000Z ` +
+			`M${cl} ${ct}h${canvas.width}v${canvas.height}h${-canvas.width}Z")`;
+	};
+
+	void snapshot.then((s) => {
+		snap = s;
+		if (snap && last) draw(last.ellipses, last.quality);
+	});
+
+	return {
+		update: (ellipses, quality) => {
+			last = { ellipses, quality };
+			draw(ellipses, quality);
+		},
+		settle: () => settle(),
+	};
+}
+
+// ---------------------------------------------------------------------------
 // Editor
 
 interface Gesture {
@@ -306,6 +471,13 @@ interface Gesture {
 	tools: Tools;
 	/** The Cut's id, fixed for the gesture so the preview matches the committed Cut. */
 	id: number;
+	/** Image px → viewport px, and the Canvas on screen, from the press. */
+	toScreen: DOMMatrixReadOnly;
+	canvas: DOMRectReadOnly;
+	/** The interface as it was at the press, for tearing it if the Cut leaves the Canvas. */
+	snapshot: Promise<InterfaceSnapshot | null>;
+	/** Once the Cut has left the Canvas: its tear in the interface. */
+	interfaceTear: InterfaceTear | null;
 }
 
 function TearEditor({
@@ -369,17 +541,21 @@ function TearEditor({
 		return len;
 	};
 
+	/** A Cut's ellipses, the same as render lays them out. */
+	const ellipsesOf = (cut: Cut) =>
+		cutEllipses(cut, createRng(seed).fork(`cut ${cut.id}`));
+
 	/** Commit the current gesture at its final size, if it's long enough to tear. */
 	const commit = () => {
 		const g = gesture.current;
 		if (!g) return;
 		gesture.current = null;
-		if (cutLength(g) >= MIN_CUT_LENGTH) {
-			const cut = toCut(
-				g,
-				g.releasedAt ?? (performance.now() - g.start) / 1000,
-			);
+		const cut = toCut(g, g.releasedAt ?? (performance.now() - g.start) / 1000);
+		if (cutLength(g) >= MIN_CUT_LENGTH)
 			setState((s) => ({ ...s, cuts: [...s.cuts, cut] }));
+		if (g.interfaceTear) {
+			g.interfaceTear.update(ellipsesOf(cut), "final");
+			g.interfaceTear.settle();
 		}
 		setLive(null);
 		setAnimating(false);
@@ -403,7 +579,11 @@ function TearEditor({
 				(now - g.start) / 1000 >= g.releasedAt + AFTER_GROW_TIME
 			)
 				commit();
-			else setLive(snapshot(g, now));
+			else {
+				const cut = snapshot(g, now);
+				setLive(cut);
+				g.interfaceTear?.update(ellipsesOf(cut), "draft");
+			}
 		});
 		return () => cancelAnimationFrame(id);
 	}, [animating, result]);
@@ -418,12 +598,16 @@ function TearEditor({
 			releasedAt: null,
 			tools,
 			id: randomSeed(),
+			toScreen: imageToScreen(e.currentTarget),
+			canvas: e.currentTarget.getBoundingClientRect(),
+			snapshot: snapshotInterface(),
+			interfaceTear: null,
 		};
 		setLive(snapshot(gesture.current, now));
 		setAnimating(true);
 	};
 
-	const onMove = (p: ImagePoint) => {
+	const onMove = (p: ImagePoint, e: PointerEvent<SVGSVGElement>) => {
 		setHover((h) => {
 			if (!h) return { p, angle: 0 };
 			const d = Math.hypot(p.x - h.p.x, p.y - h.p.y);
@@ -434,6 +618,13 @@ function TearEditor({
 		});
 		const g = gesture.current;
 		if (!g || g.releasedAt !== null) return;
+		if (!g.interfaceTear && !isOnCanvas(e))
+			g.interfaceTear = tearInterface(
+				g.toScreen,
+				g.canvas,
+				g.snapshot,
+				params.pushStrength,
+			);
 		const last = g.points[g.points.length - 1];
 		if (Math.hypot(p.x - last.x, p.y - last.y) < POINT_SPACING) return;
 		g.points.push({ ...p, t: (performance.now() - g.start) / 1000 });

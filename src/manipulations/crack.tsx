@@ -16,7 +16,7 @@ import { randomSeed } from "../core/rng";
 import { useRender } from "../core/useRender";
 import { useAppElement } from "../store/appElement";
 import { OutputStatus } from "../ui/OutputStatus";
-import { breakInterface, imageGroup, paperPath } from "../ui/interfaceBreak";
+import { breakInterface, imageGroup, inkPath } from "../ui/interfaceBreak";
 import {
 	imageToScreen,
 	RasterView,
@@ -354,19 +354,24 @@ function gapOutline(c: Crack, s0: number, s1: number): Point[] {
 /** How long a crack in the interface stays, in ms, plus per px of its wide end. */
 const BREAK_HOLD_MS = 1500;
 const BREAK_HOLD_PER_PX = 10;
+/** The ink edge around a crack in the interface, in screen px. */
+const BREAK_EDGE_PX = 1.5;
 
 /**
  * The crack carried on over the whole interface, as the same crack: the same
- * line and taper, white like the gap. Left out over the image, where the real
- * crack shows.
+ * line and taper, white like the gap with a thin ink edge. Left out over the
+ * Canvas, where the real crack shows in the image.
  */
 function crackInterface(
 	c: Crack,
-	image: { width: number; height: number },
 	toScreen: DOMMatrixReadOnly,
+	canvas: DOMRectReadOnly,
 ) {
 	// How far along the line the window reaches, in image px.
 	const toImage = toScreen.inverse();
+	// The Canvas in image px (no rotation, so a rect stays a rect).
+	const c0 = toImage.transformPoint(new DOMPoint(canvas.left, canvas.top));
+	const c1 = toImage.transformPoint(new DOMPoint(canvas.right, canvas.bottom));
 	const ux = c.b.x - c.a.x;
 	const uy = c.b.y - c.a.y;
 	const len = Math.hypot(ux, uy) || 1;
@@ -386,17 +391,22 @@ function crackInterface(
 		Math.max(...along) + pad,
 	);
 	if (outline.length === 0) return;
+	// White like the gap, with a thin ink edge so it reads on the white UI.
+	const gap = inkPath(`M${outline.map((p) => `${p.x} ${p.y}`).join("L")}Z`);
+	gap.style.fill = "var(--paper)";
+	gap.style.stroke = "var(--ink)";
+	gap.style.strokeWidth = `${BREAK_EDGE_PX}px`;
+	gap.style.strokeLinejoin = "round";
+	gap.setAttribute("vector-effect", "non-scaling-stroke");
 	breakInterface({
 		holdMs: BREAK_HOLD_MS + c.w1 * BREAK_HOLD_PER_PX,
 		draw: (container) =>
 			imageGroup(container, toScreen, {
-				x: 0,
-				y: 0,
-				width: image.width,
-				height: image.height,
-			}).append(
-				paperPath(`M${outline.map((p) => `${p.x} ${p.y}`).join("L")}Z`),
-			),
+				x: Math.min(c0.x, c1.x),
+				y: Math.min(c0.y, c1.y),
+				width: Math.abs(c1.x - c0.x),
+				height: Math.abs(c1.y - c0.y),
+			}).append(gap),
 	});
 }
 
@@ -453,7 +463,12 @@ function CrackEditor({
 	// together. Until then the preview holds the image from before the click.
 	const [held, setHeld] = useState<ImageData | null>(null);
 	const bursts = useRef<
-		{ crack: Crack; toScreen: DOMMatrixReadOnly; at: number }[]
+		{
+			crack: Crack;
+			toScreen: DOMMatrixReadOnly;
+			canvas: DOMRectReadOnly;
+			at: number;
+		}[]
 	>([]);
 	const burstTimer = useRef<number | undefined>(undefined);
 	useEffect(() => () => clearTimeout(burstTimer.current), []);
@@ -466,9 +481,9 @@ function CrackEditor({
 		clearTimeout(burstTimer.current);
 		burstTimer.current = window.setTimeout(
 			() => {
-				for (const { crack, toScreen } of bursts.current) {
+				for (const { crack, toScreen, canvas } of bursts.current) {
 					// Gone already (e.g. undone): it never opened.
-					if (opened.has(crack.id)) crackInterface(crack, input, toScreen);
+					if (opened.has(crack.id)) crackInterface(crack, toScreen, canvas);
 				}
 				bursts.current = [];
 				setHeld(null);
@@ -495,6 +510,7 @@ function CrackEditor({
 					bursts.current.push({
 						crack,
 						toScreen: imageToScreen(e.currentTarget),
+						canvas: e.currentTarget.getBoundingClientRect(),
 						at: performance.now() + BURST_AT_MS,
 					});
 					// The sides are about to burst apart: shake across the crack,
