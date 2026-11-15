@@ -781,3 +781,24 @@ details[open] > .summary::before {
 .hide-cursor * {
   cursor: none !important;
 }
+
+/* A looping frame animation: frames stacked, only the current one visible. */
+.frame-animation {
+  position: relative;
+}
+
+.frame-animation img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+
+/* A Worker walking to, and fixing, an Interface Break. */
+.worker {
+  position: absolute;
+  top: 0;
+  left: 0;
+}

@@ -64,6 +64,10 @@ _Avoid_: Editor, viewport, stage
 A short-lived disturbance of the interface itself (not the image) that a Manipulation's editor sets off during a gesture, such as a shake, or bullet holes and cracks appearing over the UI. By default it looks like the marks its Manipulation leaves on the image. The interface stays usable while broken, and each break then repairs itself in its own way. Never part of the Recipe or the Output.
 _Avoid_: Effect, glitch, screen effect
 
+**Worker**:
+A little figure that walks in from the edge of the screen to an Interface Break and works on it; when it's done, the break is repaired and both are gone.
+_Avoid_: Figure, repairman, sprite
+
 **Asset**:
 A user-supplied file (e.g. an uploaded image) that a Recipe refers to by content hash and carries with it.
 _Avoid_: Attachment, upload, resource

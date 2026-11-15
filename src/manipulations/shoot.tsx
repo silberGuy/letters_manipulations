@@ -20,6 +20,7 @@ import {
 	type ImagePoint,
 } from "../ui/RasterView";
 import { breakInterface, imageGroup, inkPath } from "../ui/interfaceBreak";
+import { sendWorker } from "../ui/worker";
 import { ScreenOverlay } from "../ui/ScreenOverlay";
 
 const paramsSchema = z.object({
@@ -243,22 +244,25 @@ class CutMask {
 	}
 }
 
-/** What a shot cuts away, in image px: holes, and its cracks as tapered segments. */
-interface ShotMarks {
-	circles: { x: number; y: number; r: number }[];
+/** One hole a shot cuts away, in image px, with its cracks as tapered segments. */
+interface HoleMarks {
+	x: number;
+	y: number;
+	r: number;
 	segments: [CrackPoint, CrackPoint][];
 }
 
-/** The holes and cracks a shot (a single hole, or a spray of pellets) makes. */
+/** The holes, with their cracks, a shot (a single hole, or a spray of pellets) makes. */
 function shotMarks(
 	hole: { x: number; y: number; r: number; kind?: "single" | "spray" },
 	crackSize: number,
 	shotRng: Rng,
-): ShotMarks {
-	const marks: ShotMarks = { circles: [], segments: [] };
+): HoleMarks[] {
+	const marks: HoleMarks[] = [];
 	// One hole with its cracks.
 	const punch = (cx: number, cy: number, r: number, holeRng: Rng) => {
-		marks.circles.push({ x: cx, y: cy, r });
+		const segments: HoleMarks["segments"] = [];
+		marks.push({ x: cx, y: cy, r, segments });
 		if (crackSize <= 0) return;
 		const size = crackSize * crackScale(r);
 		const width = Math.min(12, Math.max(1.5, r * 0.12));
@@ -273,7 +277,7 @@ function shotMarks(
 					w: p.w * width,
 				}));
 				for (let j = 1; j < pts.length; j++)
-					marks.segments.push([pts[j - 1], pts[j]]);
+					segments.push([pts[j - 1], pts[j]]);
 			}
 		}
 	};
@@ -310,8 +314,10 @@ async function render({
 	const mask = new CutMask(w, h);
 	state.holes.forEach((hole, i) => {
 		const marks = shotMarks(hole, params.crackSize, rng.fork(`hole-${hole.id ?? i}`));
-		for (const c of marks.circles) mask.circle(c.x, c.y, c.r);
-		for (const [a, b] of marks.segments) mask.taperedSegment(a, b);
+		for (const m of marks) {
+			mask.circle(m.x, m.y, m.r);
+			for (const [a, b] of m.segments) mask.taperedSegment(a, b);
+		}
 	});
 	for (let i = 0; i < mask.cover.length; i++) {
 		if (mask.cover[i] > 0) data[i * 4 + 3] *= 1 - mask.cover[i];
@@ -319,13 +325,13 @@ async function render({
 	return { raster: out };
 }
 
-/** The same marks as an SVG path: circles, and segments as tapered capsules. */
-function marksPath({ circles, segments }: ShotMarks): string {
+/** A hole's marks as an SVG path: its circle, and segments as tapered capsules. */
+function marksPath({ x, y, r, segments }: HoleMarks): string {
 	const circle = (x: number, y: number, r: number) =>
 		r > 0
 			? `M${x - r} ${y}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0Z`
 			: "";
-	const parts = circles.map((c) => circle(c.x, c.y, c.r));
+	const parts = [circle(x, y, r)];
 	for (const [a, b] of segments) {
 		const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
 		const nx = -(b.y - a.y) / len;
@@ -340,26 +346,39 @@ function marksPath({ circles, segments }: ShotMarks): string {
 	return parts.join("");
 }
 
-/** How long a shot in the interface stays, in ms, plus per px of hole radius. */
-const BREAK_HOLD_MS = 1800;
-const BREAK_HOLD_PER_PX = 20;
-/** A spray's break stays this many times longer. */
-const SPRAY_BREAK_HOLD = 1.25;
+/** How long a hole in the interface waits before its Worker sets out, in ms. */
+const WORKER_DELAY_MS = 400;
+/** How long a Worker works on a hole, in ms, plus per screen px of its radius. */
+const WORK_MS = 1600;
+const WORK_PER_PX = 25;
 
-/** A shot that missed the Canvas: the same marks, over the interface. */
+/**
+ * A shot that missed the Canvas: the same marks, over the interface. Each
+ * hole (each pellet of a spray) is its own break, and a Worker comes to fix
+ * it: when it's done, the hole is gone.
+ */
 function shootInterface(
 	hole: { x: number; y: number; r: number; kind: "single" | "spray" },
 	crackSize: number,
 	toScreen: DOMMatrixReadOnly,
 ) {
-	const marks = shotMarks(hole, crackSize, createRng(randomSeed()));
-	breakInterface({
-		holdMs:
-			(BREAK_HOLD_MS + hole.r * BREAK_HOLD_PER_PX) *
-			(hole.kind === "spray" ? SPRAY_BREAK_HOLD : 1),
-		draw: (container) =>
-			imageGroup(container, toScreen).append(inkPath(marksPath(marks))),
-	});
+	const zoom = toScreen.a;
+	for (const m of shotMarks(hole, crackSize, createRng(randomSeed()))) {
+		const at = toScreen.transformPoint(new DOMPoint(m.x, m.y));
+		const radius = m.r * zoom;
+		breakInterface({
+			holdMs: WORKER_DELAY_MS,
+			draw: (container) =>
+				imageGroup(container, toScreen).append(inkPath(marksPath(m))),
+			repair: (container) =>
+				sendWorker(container, {
+					x: at.x,
+					y: at.y,
+					radius,
+					workMs: WORK_MS + radius * WORK_PER_PX,
+				}),
+		});
+	}
 }
 
 /** Aiming reticle: the hole's ring, with ticks crossing it and a center dot. */

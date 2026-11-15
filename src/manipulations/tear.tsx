@@ -13,6 +13,7 @@ import { createRng, randomSeed, type Rng } from "../core/rng";
 import { useRender } from "../core/useRender";
 import { OutputStatus } from "../ui/OutputStatus";
 import { breakInterface, imageGroup, inkPath } from "../ui/interfaceBreak";
+import { crewSpots, sendWorkers } from "../ui/worker";
 import {
 	cropPixels,
 	snapshotInterface,
@@ -308,8 +309,10 @@ function remapState(state: State, remap: Remap): State {
 // ---------------------------------------------------------------------------
 // Interface Break
 
-/** How long a tear in the interface stays once it stops growing, in ms. */
-const BREAK_HOLD_MS = 1800;
+/** How long a tear in the interface waits, once it stops growing, before its Workers set out, in ms. */
+const WORKER_DELAY_MS = 400;
+/** How long the Workers work on a tear once they're all there, in ms. */
+const WORK_MS = 1200;
 
 /** Ellipses as one SVG path. */
 function ellipsesPath(ellipses: Ellipse[]): string {
@@ -356,9 +359,28 @@ function tearInterface(
 	patch.style.display = "none";
 	patch.style.background = "var(--ink)";
 	let settle = () => {};
+	const isOnCanvas = (p: { x: number; y: number }) =>
+		p.x >= canvas.left &&
+		p.x < canvas.right &&
+		p.y >= canvas.top &&
+		p.y < canvas.bottom;
+	let last: { ellipses: Ellipse[]; quality: RenderQuality } | null = null;
 	breakInterface({
-		holdMs: BREAK_HOLD_MS,
+		holdMs: WORKER_DELAY_MS,
 		formed: new Promise<void>((r) => (settle = r)),
+		// Workers spread along the tear, off the Canvas.
+		repair: (container) =>
+			sendWorkers(
+				container,
+				crewSpots(
+					(last?.ellipses ?? []).map((e) => {
+						const c = toScreen.transformPoint(new DOMPoint(e.cx, e.cy));
+						return { x: c.x, y: c.y };
+					}),
+					(p) => !isOnCanvas(p),
+				),
+				WORK_MS,
+			),
 		draw: (container) => {
 			imageGroup(container, toScreen, {
 				x: Math.min(p0.x, p1.x),
@@ -373,7 +395,6 @@ function tearInterface(
 	// Image px → screen px is a uniform scale (the Canvas keeps the aspect).
 	const zoom = toScreen.a;
 	let snap: InterfaceSnapshot | null = null;
-	let last: { ellipses: Ellipse[]; quality: RenderQuality } | null = null;
 
 	const draw = (ellipses: Ellipse[], quality: RenderQuality) => {
 		if (!snap) {
@@ -387,12 +408,7 @@ function tearInterface(
 		const es: Ellipse[] = [];
 		for (const e of ellipses) {
 			const c = toScreen.transformPoint(new DOMPoint(e.cx, e.cy));
-			const onCanvas =
-				c.x >= canvas.left &&
-				c.x < canvas.right &&
-				c.y >= canvas.top &&
-				c.y < canvas.bottom;
-			if (onCanvas) continue;
+			if (isOnCanvas(c)) continue;
 			es.push({
 				...e,
 				cx: (c.x - snap.x) * scale,

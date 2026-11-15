@@ -17,11 +17,9 @@ import { useRender } from "../core/useRender";
 import { useAppElement } from "../store/appElement";
 import { OutputStatus } from "../ui/OutputStatus";
 import { breakInterface, imageGroup, inkPath } from "../ui/interfaceBreak";
-import {
-	imageToScreen,
-	RasterView,
-	type ImagePoint,
-} from "../ui/RasterView";
+import { crewSpots, sendWorkers } from "../ui/worker";
+import { ScreenOverlay } from "../ui/ScreenOverlay";
+import { imageToScreen, RasterView, type ImagePoint } from "../ui/RasterView";
 import { shake } from "../ui/shake";
 
 const paramsSchema = z.object({});
@@ -320,17 +318,21 @@ function newCrack(
 }
 
 /**
- * The crack's gap in the Output, as a closed outline: its + edge, then its −
- * edge back, carried on past `a` and `b` along the line for s in [s0, s1]
+ * The crack's gap in the Output, as its two edges (+ and −, point for point),
+ * carried on past `a` and `b` along the line for s in [s0, s1]
  * (s measured from `a`). Past the thin end it narrows to a point; past the
  * wide end it keeps widening.
  */
-function gapOutline(c: Crack, s0: number, s1: number): Point[] {
+function gapEdges(
+	c: Crack,
+	s0: number,
+	s1: number,
+): { plus: Point[]; minus: Point[] } {
 	const g = crackGeom(c);
 	// The width there is 2·(half0 + s·sin): stop where it closes.
 	if (g.sin > 0) s0 = Math.max(s0, -g.half0 / g.sin);
 	else if (g.sin < 0) s1 = Math.min(s1, -g.half0 / g.sin);
-	if (s1 <= s0) return [];
+	if (s1 <= s0) return { plus: [], minus: [] };
 	const period = c.period ?? Math.max(4, c.rough * 5);
 	// Fine enough for the finer zig-zags, but bounded for long spans.
 	const step = Math.max(period / 8, (s1 - s0) / 3000);
@@ -348,12 +350,15 @@ function gapOutline(c: Crack, s0: number, s1: number): Point[] {
 		minus.push(at(s, -1));
 		if (s >= s1) break;
 	}
-	return [...plus, ...minus.reverse()];
+	return { plus, minus };
 }
 
-/** How long a crack in the interface stays, in ms, plus per px of its wide end. */
-const BREAK_HOLD_MS = 1500;
-const BREAK_HOLD_PER_PX = 10;
+/** How long a crack in the interface waits before its Workers set out, in ms. */
+const WORKER_DELAY_MS = 400;
+/** How long the Workers work on a crack once they're all there, in ms. */
+const WORK_MS = 1200;
+/** How far a crack in the interface reaches into the Canvas, in screen px. */
+const CANVAS_OVERLAP_PX = 0.5;
 /** The ink edge around a crack in the interface, in screen px. */
 const BREAK_EDGE_PX = 1.5;
 
@@ -362,16 +367,12 @@ const BREAK_EDGE_PX = 1.5;
  * line and taper, white like the gap with a thin ink edge. Left out over the
  * Canvas, where the real crack shows in the image.
  */
-function crackInterface(
-	c: Crack,
-	toScreen: DOMMatrixReadOnly,
-	canvas: DOMRectReadOnly,
-) {
-	// How far along the line the window reaches, in image px.
+/**
+ * How far along a crack's line (from `a`, in image px) the screen reaches,
+ * either way: where the line enters and leaves the viewport, roughly.
+ */
+function screenSpan(c: Crack, toScreen: DOMMatrixReadOnly): [number, number] {
 	const toImage = toScreen.inverse();
-	// The Canvas in image px (no rotation, so a rect stays a rect).
-	const c0 = toImage.transformPoint(new DOMPoint(canvas.left, canvas.top));
-	const c1 = toImage.transformPoint(new DOMPoint(canvas.right, canvas.bottom));
 	const ux = c.b.x - c.a.x;
 	const uy = c.b.y - c.a.y;
 	const len = Math.hypot(ux, uy) || 1;
@@ -384,13 +385,49 @@ function crackInterface(
 		const p = toImage.transformPoint(new DOMPoint(x, y));
 		return ((p.x - c.a.x) * ux + (p.y - c.a.y) * uy) / len;
 	});
-	const pad = Math.max(c.w0, c.w1) + c.rough;
-	const outline = gapOutline(
-		c,
-		Math.min(...along) - pad,
-		Math.max(...along) + pad,
+	return [Math.min(...along), Math.max(...along)];
+}
+
+function crackInterface(
+	c: Crack,
+	toScreen: DOMMatrixReadOnly,
+	canvas: DOMRectReadOnly,
+) {
+	const toImage = toScreen.inverse();
+	// The Canvas in image px (no rotation, so a rect stays a rect), a little
+	// smaller so the white overlaps its edge instead of leaving a seam.
+	const c0 = toImage.transformPoint(
+		new DOMPoint(
+			canvas.left + CANVAS_OVERLAP_PX,
+			canvas.top + CANVAS_OVERLAP_PX,
+		),
 	);
-	if (outline.length === 0) return;
+	const c1 = toImage.transformPoint(
+		new DOMPoint(
+			canvas.right - CANVAS_OVERLAP_PX,
+			canvas.bottom - CANVAS_OVERLAP_PX,
+		),
+	);
+	const [s0, s1] = screenSpan(c, toScreen);
+	const pad = Math.max(c.w0, c.w1) + c.rough;
+	const { plus, minus } = gapEdges(c, s0 - pad, s1 + pad);
+	if (plus.length === 0) return;
+	const outline = [...plus, ...[...minus].reverse()];
+	// The Workers spread along the middle of the gap, off the Canvas.
+	const middle = plus.map((p, i) => {
+		const q = toScreen.transformPoint(
+			new DOMPoint((p.x + minus[i].x) / 2, (p.y + minus[i].y) / 2),
+		);
+		return { x: q.x, y: q.y };
+	});
+	const spots = crewSpots(
+		middle,
+		(p) =>
+			p.x < canvas.left ||
+			p.x >= canvas.right ||
+			p.y < canvas.top ||
+			p.y >= canvas.bottom,
+	);
 	// White like the gap, with a thin ink edge so it reads on the white UI.
 	const gap = inkPath(`M${outline.map((p) => `${p.x} ${p.y}`).join("L")}Z`);
 	gap.style.fill = "var(--paper)";
@@ -399,7 +436,7 @@ function crackInterface(
 	gap.style.strokeLinejoin = "round";
 	gap.setAttribute("vector-effect", "non-scaling-stroke");
 	breakInterface({
-		holdMs: BREAK_HOLD_MS + c.w1 * BREAK_HOLD_PER_PX,
+		holdMs: WORKER_DELAY_MS,
 		draw: (container) =>
 			imageGroup(container, toScreen, {
 				x: Math.min(c0.x, c1.x),
@@ -407,6 +444,7 @@ function crackInterface(
 				width: Math.abs(c1.x - c0.x),
 				height: Math.abs(c1.y - c0.y),
 			}).append(gap),
+		repair: (container) => sendWorkers(container, spots, WORK_MS),
 	});
 }
 
@@ -420,15 +458,28 @@ const SHAKE_STRENGTH = 8;
 /** A random direction for the next crack (editor only, never in render). */
 const rollAngle = () => Math.random() * 2 * Math.PI;
 
-/** Where a crack would run: its axis, from the thin end to the wide end. */
-function Axis({ crack }: { crack: Crack }) {
+/**
+ * Where a crack would run: its axis, across the whole screen, as the crack
+ * carries on over the interface. In image px, placed by `toScreen`.
+ */
+function Axis({
+	crack,
+	toScreen,
+}: {
+	crack: Crack;
+	toScreen: DOMMatrixReadOnly;
+}) {
 	const { a, b } = crack;
+	const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+	const ux = (b.x - a.x) / len;
+	const uy = (b.y - a.y) / len;
+	const [s0, s1] = screenSpan(crack, toScreen);
 	return (
 		<line
-			x1={a.x}
-			y1={a.y}
-			x2={b.x}
-			y2={b.y}
+			x1={a.x + ux * s0}
+			y1={a.y + uy * s0}
+			x2={a.x + ux * s1}
+			y2={a.y + uy * s1}
 			stroke="#e5484d"
 			strokeWidth={1}
 			strokeDasharray="4 3"
@@ -448,7 +499,11 @@ function CrackEditor({
 	assets,
 }: EditorProps<Params, State, Tools>) {
 	const result = useRender(render, input, params, state, seed, assets);
-	const [hover, setHover] = useState<ImagePoint | null>(null);
+	// Where the pointer is over the Canvas, and image px → viewport px there.
+	const [hover, setHover] = useState<{
+		p: ImagePoint;
+		toScreen: DOMMatrixReadOnly;
+	} | null>(null);
 	// Drawn ahead, so the preview shows the crack the next click opens. Only
 	// the crack's ends go into State, so Recipes still reproduce.
 	const [randomAngle, setRandomAngle] = useState(rollAngle);
@@ -456,7 +511,7 @@ function CrackEditor({
 		? randomAngle
 		: (tools.direction.value * Math.PI) / 180;
 	const preview =
-		hover && newCrack(hover, angle, tools, input.width, input.height);
+		hover && newCrack(hover.p, angle, tools, input.width, input.height);
 
 	// A click shakes at once; BURST_AT_MS later (or once its render lands, if
 	// later still) the crack opens in the image and across the interface
@@ -498,7 +553,9 @@ function CrackEditor({
 				// Output is the same size as input, so image coords map 1:1.
 				image={held ?? result.output?.raster ?? input}
 				cursor="crosshair"
-				onPointerMove={setHover}
+				onPointerMove={(p, e) =>
+					setHover({ p, toScreen: imageToScreen(e.currentTarget) })
+				}
 				onPointerLeave={() => setHover(null)}
 				onPointerDown={(p, e) => {
 					const crack = newCrack(p, angle, tools, input.width, input.height);
@@ -523,8 +580,12 @@ function CrackEditor({
 					);
 					setRandomAngle(rollAngle());
 				}}
-				overlay={preview && <Axis crack={preview} />}
 			/>
+			{hover && preview && (
+				<ScreenOverlay toScreen={hover.toScreen}>
+					<Axis crack={preview} toScreen={hover.toScreen} />
+				</ScreenOverlay>
+			)}
 			<OutputStatus result={result} />
 		</>
 	);
