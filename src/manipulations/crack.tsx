@@ -358,9 +358,9 @@ const WORKER_DELAY_MS = 400;
 /** How long the Workers work on a crack once they're all there, in ms. */
 const WORK_MS = 1200;
 /** How far a crack in the interface reaches into the Canvas, in screen px. */
-const CANVAS_OVERLAP_PX = 0.5;
+const CANVAS_OVERLAP_PX = 0.23;
 /** The ink edge around a crack in the interface, in screen px. */
-const BREAK_EDGE_PX = 1.5;
+const BREAK_EDGE_PX = 2;
 
 /**
  * The crack carried on over the whole interface, as the same crack: the same
