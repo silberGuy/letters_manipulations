@@ -8,7 +8,7 @@ import {
 } from "../core/manipulation";
 import { context2d, inkColor, rasterToCanvas, rgbToHex } from "../core/raster";
 import { remapItems, type Remap } from "../core/remap";
-import { randomSeed, type Rng } from "../core/rng";
+import { createRng, randomSeed, type Rng } from "../core/rng";
 import { useRender } from "../core/useRender";
 import {
 	vectorize,
@@ -16,7 +16,25 @@ import {
 	type VectorizeOptions,
 } from "../vectorize/vectorize";
 import { OutputStatus } from "../ui/OutputStatus";
-import { RasterView, type ImagePoint } from "../ui/RasterView";
+import {
+	imageToScreen,
+	isOnCanvas,
+	RasterView,
+	type ImagePoint,
+} from "../ui/RasterView";
+import {
+	cropPixels,
+	snapshotInterface,
+	type InterfaceSnapshot,
+} from "../ui/snapshot";
+import {
+	interfaceInk,
+	snapshotBox,
+	snapshotBreak,
+	toSnapshot,
+	type SnapshotBreak,
+} from "../ui/snapshotBreak";
+import { ScreenOverlay } from "../ui/ScreenOverlay";
 
 /** Cap on blades per press, so a very long press stays renderable. */
 const MAX_BLADES_PER_PRESS = 1000;
@@ -382,6 +400,169 @@ function remapState(state: State, remap: Remap): State {
 }
 
 // ---------------------------------------------------------------------------
+// Interface Break
+
+/** How long grass on the interface waits, once the press ends, before its Workers set out, in ms. */
+const WORKER_DELAY_MS = 400;
+/** How long the Workers work on it once they're all there, in ms. */
+const WORK_MS = 1200;
+
+/** Whether a brush (image px) reaches past the Canvas on screen. */
+function brushLeavesCanvas(
+	toScreen: DOMMatrixReadOnly,
+	canvas: DOMRectReadOnly,
+	x: number,
+	y: number,
+	radius: number,
+): boolean {
+	const c = toScreen.transformPoint(new DOMPoint(x, y));
+	const r = radius * toScreen.a;
+	return (
+		c.x - r < canvas.left ||
+		c.x + r > canvas.right ||
+		c.y - r < canvas.top ||
+		c.y + r > canvas.bottom
+	);
+}
+
+/** How far past the Canvas's edge a Worker stands for a brush centered on it, in screen px. */
+const CREW_OUTSIDE_PX = 12;
+/**
+ * Workers stand on a screen grid this many px apart, one at each point a
+ * brush covers off the Canvas: bigger brushes bring more of them. A shared
+ * grid, so overlapping brushes share their Workers.
+ */
+const CREW_GRID_PX = 64;
+
+/**
+ * Presses whose brush reaches past the Canvas grow grass on the interface
+ * too: in a snapshot of it, blades grow out of the interface's own ink (its
+ * dark pixels: text, borders) just as out of the letters, as densely along
+ * its edges; on the Canvas, the patch leaves them out. Each press gets the
+ * same random stream as in render.
+ */
+function grassInterface(
+	toScreen: DOMMatrixReadOnly,
+	canvas: DOMRectReadOnly,
+	snapshot: Promise<InterfaceSnapshot | null>,
+	params: Params,
+	seed: number,
+): SnapshotBreak<Press[]> {
+	const toViewport = (p: Press) => {
+		const c = toScreen.transformPoint(new DOMPoint(p.x, p.y));
+		return { x: c.x, y: c.y };
+	};
+	const reachesOut = (p: Press) =>
+		brushLeavesCanvas(toScreen, canvas, p.x, p.y, p.radius);
+	/** Where a Worker goes for a press: its center, or just off the Canvas's nearest edge. */
+	const crewSpot = (p: Press) => {
+		const c = toViewport(p);
+		const inside =
+			c.x >= canvas.left &&
+			c.x < canvas.right &&
+			c.y >= canvas.top &&
+			c.y < canvas.bottom;
+		if (!inside) return c;
+		const out = CREW_OUTSIDE_PX;
+		const edges = [
+			{ d: c.x - canvas.left, x: canvas.left - out, y: c.y },
+			{ d: canvas.right - c.x, x: canvas.right + out, y: c.y },
+			{ d: c.y - canvas.top, x: c.x, y: canvas.top - out },
+			{ d: canvas.bottom - c.y, x: c.x, y: canvas.bottom + out },
+		];
+		const e = edges.reduce((a, b) => (b.d < a.d ? b : a));
+		return { x: e.x, y: e.y };
+	};
+	return snapshotBreak<Press[]>({
+		snapshot,
+		toScreen,
+		canvas,
+		holes: "paper",
+		delayMs: WORKER_DELAY_MS,
+		workMs: WORK_MS,
+		crew: (presses) => {
+			const spots = new Map<string, { x: number; y: number }>();
+			for (const p of presses.filter(reachesOut)) {
+				const c = toViewport(p);
+				const r = p.radius * toScreen.a;
+				const g = CREW_GRID_PX;
+				let found = false;
+				for (let gy = Math.ceil((c.y - r) / g) * g; gy <= c.y + r; gy += g) {
+					for (let gx = Math.ceil((c.x - r) / g) * g; gx <= c.x + r; gx += g) {
+						if (Math.hypot(gx - c.x, gy - c.y) > r) continue;
+						const onCanvas =
+							gx >= canvas.left &&
+							gx < canvas.right &&
+							gy >= canvas.top &&
+							gy < canvas.bottom;
+						if (onCanvas) continue;
+						spots.set(`${gx},${gy}`, { x: gx, y: gy });
+						found = true;
+					}
+				}
+				// A brush too small to cover a grid point still gets one.
+				if (!found) {
+					const s = crewSpot(p);
+					spots.set(`${s.x},${s.y}`, s);
+				}
+			}
+			return [...spots.values()];
+		},
+		render: (snap, presses) => {
+			// The presses reaching past the Canvas, and all sizes, in snapshot px. The
+			// rate is per px of edge, so it's scaled down to keep the density.
+			const k = toScreen.a * snap.scale;
+			const off = presses
+				.filter(reachesOut)
+				.map((p) => ({
+					...p,
+					...toSnapshot(snap, toScreen, p.x, p.y),
+					radius: p.radius * k,
+					rate: p.rate / k,
+				}));
+			const scaled: Params = {
+				...params,
+				minLength: params.minLength * k,
+				maxLength: params.maxLength * k,
+				baseWidth: params.baseWidth * k,
+			};
+			const reach =
+				Math.max(scaled.minLength, scaled.maxLength) + scaled.baseWidth + 2;
+			const box = snapshotBox(
+				snap,
+				off.map((p) => ({ x: p.x, y: p.y, r: p.radius + reach })),
+			);
+			if (!box) return null;
+			const { x0, y0, w, h } = box;
+			const crop = cropPixels(snap.pixels, x0, y0, w, h);
+			const ink = interfaceInk(crop);
+			const rng = createRng(seed);
+			const blades = off.flatMap((press) =>
+				pressBlades(
+					ink,
+					{ ...press, x: press.x - x0, y: press.y - y0 },
+					scaled,
+					rng.fork(`press-${press.id}`),
+				),
+			);
+			const ctx = context2d(rasterToCanvas(crop));
+			// The interface's own ink color (averaging its pixels would pick up the paper).
+			ctx.fillStyle =
+				getComputedStyle(document.documentElement).getPropertyValue("--ink").trim() ||
+				"#000";
+			ctx.beginPath();
+			for (const pts of blades) {
+				ctx.moveTo(pts[0][0], pts[0][1]);
+				for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+				ctx.closePath();
+			}
+			ctx.fill("nonzero");
+			return { pixels: ctx.getImageData(0, 0, w, h), x: x0, y: y0 };
+		},
+	});
+}
+
+// ---------------------------------------------------------------------------
 // Editor
 
 interface Gesture {
@@ -390,6 +571,13 @@ interface Gesture {
 	current: { x: number; y: number; start: number; id: number };
 	/** Growth settings at the start of the gesture, copied into each of its presses. */
 	growth: Tools;
+	/** Image px → viewport px, and the Canvas on screen, from the press. */
+	toScreen: DOMMatrixReadOnly;
+	canvas: DOMRectReadOnly;
+	/** The interface as it was at the press, for growing on it if the drag leaves the Canvas. */
+	snapshot: Promise<InterfaceSnapshot | null>;
+	/** Once the drag has left the Canvas: the grass on the interface. */
+	interfaceGrass: SnapshotBreak<Press[]> | null;
 }
 
 function GrassEditor({
@@ -404,7 +592,12 @@ function GrassEditor({
 	const gesture = useRef<Gesture | null>(null);
 	const [live, setLive] = useState<Press[] | null>(null);
 	const [holding, setHolding] = useState(false);
-	const [hover, setHover] = useState<ImagePoint | null>(null);
+	// Where the brush is, and image px → viewport px there: it's drawn over the
+	// whole interface, since it may reach past the Canvas.
+	const [hover, setHover] = useState<{
+		p: ImagePoint;
+		toScreen: DOMMatrixReadOnly;
+	} | null>(null);
 
 	const shownState = useMemo(
 		() => (live ? { ...state, presses: [...state.presses, ...live] } : state),
@@ -431,10 +624,24 @@ function GrassEditor({
 	useEffect(() => {
 		if (!holding || result.pending) return;
 		const id = requestAnimationFrame(() => {
-			if (gesture.current) setLive(snapshot(performance.now()));
+			const g = gesture.current;
+			if (!g) return;
+			const presses = snapshot(performance.now());
+			setLive(presses);
+			g.interfaceGrass?.update(presses);
 		});
 		return () => cancelAnimationFrame(id);
 	}, [holding, result]);
+	// Grass on the interface still growing when the editor goes away: let it be cleared.
+	useEffect(() => () => gesture.current?.interfaceGrass?.settle(), []);
+
+	/** Once the current press's brush reaches past the Canvas, the grass breaks the interface too. */
+	const breakIfOut = (g: Gesture) => {
+		if (g.interfaceGrass) return;
+		const { x, y } = g.current;
+		if (!brushLeavesCanvas(g.toScreen, g.canvas, x, y, g.growth.radius)) return;
+		g.interfaceGrass = grassInterface(g.toScreen, g.canvas, g.snapshot, params, seed);
+	};
 
 	const onDown = (p: ImagePoint, e: PointerEvent<SVGSVGElement>) => {
 		e.currentTarget.setPointerCapture(e.pointerId);
@@ -442,14 +649,19 @@ function GrassEditor({
 			done: [],
 			current: { ...p, start: performance.now(), id: randomSeed() },
 			growth: tools,
+			toScreen: imageToScreen(e.currentTarget),
+			canvas: e.currentTarget.getBoundingClientRect(),
+			snapshot: snapshotInterface(),
+			interfaceGrass: null,
 		};
+		breakIfOut(gesture.current);
 		setLive(snapshot(performance.now()));
 		setHolding(true);
 	};
 
 	// Dragging paints a trail: a new press starts every so often along the way.
-	const onMove = (p: ImagePoint) => {
-		setHover(p);
+	const onMove = (p: ImagePoint, e: PointerEvent<SVGSVGElement>) => {
+		setHover({ p, toScreen: imageToScreen(e.currentTarget) });
 		const g = gesture.current;
 		if (!g) return;
 		const spacing = Math.max(2, g.growth.radius * TRAIL_SPACING);
@@ -457,12 +669,20 @@ function GrassEditor({
 		const now = performance.now();
 		g.done = snapshot(now);
 		g.current = { ...p, start: now, id: randomSeed() };
+		breakIfOut(g);
 	};
 
-	const onUp = () => {
-		if (!gesture.current) return;
+	const onUp = (_: ImagePoint, e: PointerEvent<SVGSVGElement>) => {
+		// Released off the Canvas: nothing to hover anymore.
+		if (!isOnCanvas(e)) setHover(null);
+		const g = gesture.current;
+		if (!g) return;
 		const presses = snapshot(performance.now());
 		gesture.current = null;
+		if (g.interfaceGrass) {
+			g.interfaceGrass.update(presses);
+			g.interfaceGrass.settle();
+		}
 		setState((s) => ({ ...s, presses: [...s.presses, ...presses] }));
 		setLive(null);
 		setHolding(false);
@@ -478,20 +698,20 @@ function GrassEditor({
 				onPointerMove={onMove}
 				onPointerUp={onUp}
 				onPointerLeave={() => setHover(null)}
-				overlay={
-					hover && (
-						<circle
-							cx={hover.x}
-							cy={hover.y}
-							r={tools.radius}
-							fill="none"
-							stroke="#30a46c"
-							strokeWidth={1.5}
-							vectorEffect="non-scaling-stroke"
-						/>
-					)
-				}
 			/>
+			{hover && (
+				<ScreenOverlay toScreen={hover.toScreen}>
+					<circle
+						cx={hover.p.x}
+						cy={hover.p.y}
+						r={tools.radius}
+						fill="none"
+						stroke="#30a46c"
+						strokeWidth={1.5}
+						vectorEffect="non-scaling-stroke"
+					/>
+				</ScreenOverlay>
+			)}
 			<OutputStatus result={result} />
 		</>
 	);
