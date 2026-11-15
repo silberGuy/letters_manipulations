@@ -1,3 +1,4 @@
+import { useAppElement } from '../store/appElement';
 import { useStore } from '../store/store';
 import { Editor } from './Editor';
 import { SourcePanel } from './SourcePanel';
@@ -9,9 +10,10 @@ export function App() {
   const warnings = useStore((s) => s.warnings);
   const dismissWarnings = useStore((s) => s.dismissWarnings);
   const selectedStep = useStore((s) => s.selectedStep);
+  const setAppElement = useAppElement((s) => s.setAppElement);
 
   return (
-    <div className="app">
+    <div className="app" ref={setAppElement}>
       <div className="sidebar border-right">
         <SourcePanel />
         <FileActions />

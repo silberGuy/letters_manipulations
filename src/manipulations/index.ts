@@ -4,12 +4,12 @@ import { bubblingAcid } from './bubbling-acid';
 import { goo } from './goo';
 import { grass } from './grass';
 import { gridWarp } from './grid-warp';
-import { hole } from './hole';
+import { shoot } from './shoot';
 import { eatingAcid } from './eating-acid';
 import { skew } from './skew';
 import { tear } from './tear';
 
-export const MANIPULATIONS: Manipulation[] = [goo, skew, hole, bubblingAcid, eatingAcid, tear, gridWarp, grass];
+export const MANIPULATIONS: Manipulation[] = [goo, skew, shoot, bubblingAcid, eatingAcid, tear, gridWarp, grass];
 
 // Fail at startup, not mid-session, if a Manipulation's schemas are unusable.
 for (const m of MANIPULATIONS) {
