@@ -7,6 +7,12 @@ export interface SnapshotPatch {
   pixels: ImageData;
   x: number;
   y: number;
+  /**
+   * Where the patch may show over the Canvas (1 per pixel; e.g. inside holes
+   * that reach onto it from the interface). Without it, it leaves the Canvas
+   * alone entirely.
+   */
+  onCanvas?: Uint8Array;
 }
 
 export interface SnapshotBreakOptions<T> {
@@ -96,6 +102,19 @@ export function snapshotBreak<T>(o: SnapshotBreakOptions<T>): SnapshotBreak<T> {
       cropPixels(snap.pixels, x, y, out.pixels.width, out.pixels.height),
       holeColor,
     );
+    // Over the Canvas, only where the break says it may show.
+    if (out.onCanvas) {
+      const { width: w, height: h, data } = pixels;
+      for (let j = 0; j < h; j++) {
+        const vy = snap.y + (y + j + 0.5) / scale;
+        if (vy < canvas.top || vy >= canvas.bottom) continue;
+        for (let i = 0; i < w; i++) {
+          const vx = snap.x + (x + i + 0.5) / scale;
+          if (vx < canvas.left || vx >= canvas.right) continue;
+          if (!out.onCanvas[j * w + i]) data[(j * w + i) * 4 + 3] = 0;
+        }
+      }
+    }
     patch.width = pixels.width;
     patch.height = pixels.height;
     patch.getContext('2d')!.putImageData(pixels, 0, 0);
@@ -109,9 +128,10 @@ export function snapshotBreak<T>(o: SnapshotBreakOptions<T>): SnapshotBreak<T> {
     patch.style.height = `${pixels.height / scale}px`;
     const cl = canvas.left - left;
     const ct = canvas.top - top;
-    patch.style.clipPath =
-      `path(evenodd, "M-100000 -100000H100000V100000H-100000Z ` +
-      `M${cl} ${ct}h${canvas.width}v${canvas.height}h${-canvas.width}Z")`;
+    patch.style.clipPath = out.onCanvas
+      ? ''
+      : `path(evenodd, "M-100000 -100000H100000V100000H-100000Z ` +
+        `M${cl} ${ct}h${canvas.width}v${canvas.height}h${-canvas.width}Z")`;
   };
 
   void o.snapshot.then((s) => {

@@ -333,6 +333,32 @@ function ellipsesPath(ellipses: Ellipse[]): string {
 		.join("");
 }
 
+/** 1 inside any of the ellipses (a little past their edge, for anti-aliasing), per pixel of a w × h box. */
+function ellipseMask(ellipses: Ellipse[], w: number, h: number): Uint8Array {
+	const mask = new Uint8Array(w * h);
+	for (const e of ellipses) {
+		const cos = Math.cos(e.angle);
+		const sin = Math.sin(e.angle);
+		const a = e.a + 1;
+		const b = e.b + 1;
+		const r = Math.max(a, b);
+		const x0 = Math.max(0, Math.floor(e.cx - r));
+		const x1 = Math.min(w - 1, Math.ceil(e.cx + r));
+		const y0 = Math.max(0, Math.floor(e.cy - r));
+		const y1 = Math.min(h - 1, Math.ceil(e.cy + r));
+		for (let y = y0; y <= y1; y++) {
+			for (let x = x0; x <= x1; x++) {
+				const dx = x + 0.5 - e.cx;
+				const dy = y + 0.5 - e.cy;
+				const u = (dx * cos + dy * sin) / a;
+				const v = (-dx * sin + dy * cos) / b;
+				if (u * u + v * v <= 1) mask[y * w + x] = 1;
+			}
+		}
+	}
+	return mask;
+}
+
 /** The tear's ellipses now, and the quality to push them at. */
 interface TearShape {
 	ellipses: Ellipse[];
@@ -352,11 +378,6 @@ function tearInterface(
 	snapshot: Promise<InterfaceSnapshot | null>,
 	pushStrength: number,
 ): SnapshotBreak<TearShape> {
-	const onCanvas = (p: { x: number; y: number }) =>
-		p.x >= canvas.left &&
-		p.x < canvas.right &&
-		p.y >= canvas.top &&
-		p.y < canvas.bottom;
 	const toViewport = (e: Ellipse) => {
 		const c = toScreen.transformPoint(new DOMPoint(e.cx, e.cy));
 		return { x: c.x, y: c.y };
@@ -371,10 +392,20 @@ function tearInterface(
 		plain: ({ ellipses }) => ellipsesPath(ellipses),
 		crew: ({ ellipses }) => ellipses.map(toViewport),
 		render: (snap, { ellipses, quality }) => {
-			// The ellipses off the Canvas, in snapshot px.
-			const k = toScreen.a * snap.scale;
+			// The ellipses reaching past the Canvas, in snapshot px.
+			const zoom = toScreen.a;
+			const k = zoom * snap.scale;
 			const es: Ellipse[] = ellipses
-				.filter((e) => !onCanvas(toViewport(e)))
+				.filter((e) => {
+					const c = toViewport(e);
+					const r = Math.max(e.a, e.b) * zoom;
+					return (
+						c.x - r < canvas.left ||
+						c.x + r > canvas.right ||
+						c.y - r < canvas.top ||
+						c.y + r > canvas.bottom
+					);
+				})
 				.map((e) => {
 					const c = toSnapshot(snap, toScreen, e.cx, e.cy);
 					return { ...e, cx: c.x, cy: c.y, a: e.a * k, b: e.b * k };
@@ -385,10 +416,16 @@ function tearInterface(
 			);
 			if (!box) return null;
 			const { x0, y0, w, h } = box;
+			const local = es.map((e) => ({ ...e, cx: e.cx - x0, cy: e.cy - y0 }));
 			const push = new PushCanvas(cropPixels(snap.pixels, x0, y0, w, h), quality);
-			for (const e of es)
-				push.open({ ...e, cx: e.cx - x0, cy: e.cy - y0 }, pushStrength);
-			return { pixels: push.toImageData(PUSHED_MIN_ALPHA), x: x0, y: y0 };
+			for (const e of local) push.open(e, pushStrength);
+			return {
+				pixels: push.toImageData(PUSHED_MIN_ALPHA),
+				x: x0,
+				y: y0,
+				// Holes reaching onto the Canvas show whole there, nothing else.
+				onCanvas: ellipseMask(local, w, h),
+			};
 		},
 	});
 }
