@@ -8,6 +8,19 @@ export interface ImagePoint {
   y: number;
 }
 
+/** Image px → viewport px, for the Canvas an event came from (its `currentTarget`). */
+export function imageToScreen(canvas: SVGSVGElement): DOMMatrix {
+  // Some browsers return a legacy SVGMatrix (no transformPoint): copy it.
+  const m = canvas.getScreenCTM();
+  return m ? new DOMMatrix([m.a, m.b, m.c, m.d, m.e, m.f]) : new DOMMatrix();
+}
+
+/** Whether a pointer event (e.g. during pointer capture) is over its Canvas. */
+export function isOnCanvas(e: PointerEvent<SVGSVGElement>): boolean {
+  const r = e.currentTarget.getBoundingClientRect();
+  return e.clientX >= r.left && e.clientX < r.right && e.clientY >= r.top && e.clientY < r.bottom;
+}
+
 interface Props {
   image: ImageData | null;
   /** SVG content drawn on top, in image pixel coordinates. */

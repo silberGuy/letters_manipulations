@@ -56,6 +56,14 @@ _Avoid_: Split, rift, fault
 How a Step moves points from its input to its Output (e.g. a Crack pushing each side away). When a Step's Displacement changes, the State of later Steps moves with it, and edits of the Source are carried through it.
 _Avoid_: Warp, deformation
 
+**Canvas**:
+The area of the interface where a Manipulation's editor shows its image and takes the user's presses, including the empty margin around the image.
+_Avoid_: Editor, viewport, stage
+
+**Interface Break**:
+A short-lived disturbance of the interface itself (not the image) that a Manipulation's editor sets off during a gesture, such as a shake, or bullet holes and cracks appearing over the UI. By default it looks like the marks its Manipulation leaves on the image. The interface stays usable while broken, and each break then repairs itself in its own way. Never part of the Recipe or the Output.
+_Avoid_: Effect, glitch, screen effect
+
 **Asset**:
 A user-supplied file (e.g. an uploaded image) that a Recipe refers to by content hash and carries with it.
 _Avoid_: Attachment, upload, resource

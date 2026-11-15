@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { z } from "zod";
 import { enumField, numberField } from "../core/fields";
 import {
@@ -8,12 +8,19 @@ import {
 } from "../core/manipulation";
 import { cloneRaster } from "../core/raster";
 import { remapItems } from "../core/remap";
-import { randomSeed, type Rng } from "../core/rng";
+import { createRng, randomSeed, type Rng } from "../core/rng";
 import { useRender } from "../core/useRender";
 import { OutputStatus } from "../ui/OutputStatus";
 import { useAppElement } from "../store/appElement";
 import { shake } from "../ui/shake";
-import { RasterView, type ImagePoint } from "../ui/RasterView";
+import {
+	imageToScreen,
+	isOnCanvas,
+	RasterView,
+	type ImagePoint,
+} from "../ui/RasterView";
+import { breakInterface, imageGroup, paperPath } from "../ui/interfaceBreak";
+import { ScreenOverlay } from "../ui/ScreenOverlay";
 
 const paramsSchema = z.object({
 	crackSize: numberField({
@@ -236,21 +243,24 @@ class CutMask {
 	}
 }
 
-/** Punch anti-aliased circular holes, with cracks, through the ink. */
-async function render({
-	input,
-	params,
-	state,
-	rng,
-}: RenderContext<Params, State>) {
-	const out = cloneRaster(input);
-	const { width: w, height: h, data } = out;
-	const mask = new CutMask(w, h);
+/** What a shot cuts away, in image px: holes, and its cracks as tapered segments. */
+interface ShotMarks {
+	circles: { x: number; y: number; r: number }[];
+	segments: [CrackPoint, CrackPoint][];
+}
+
+/** The holes and cracks a shot (a single hole, or a spray of pellets) makes. */
+function shotMarks(
+	hole: { x: number; y: number; r: number; kind?: "single" | "spray" },
+	crackSize: number,
+	shotRng: Rng,
+): ShotMarks {
+	const marks: ShotMarks = { circles: [], segments: [] };
 	// One hole with its cracks.
 	const punch = (cx: number, cy: number, r: number, holeRng: Rng) => {
-		mask.circle(cx, cy, r);
-		if (params.crackSize <= 0) return;
-		const size = params.crackSize * crackScale(r);
+		marks.circles.push({ x: cx, y: cy, r });
+		if (crackSize <= 0) return;
+		const size = crackSize * crackScale(r);
 		const width = Math.min(12, Math.max(1.5, r * 0.12));
 		for (const { angle, lines } of crackShapes(holeRng)) {
 			// Start a little inside the edge so the crack joins the hole cleanly.
@@ -263,35 +273,93 @@ async function render({
 					w: p.w * width,
 				}));
 				for (let j = 1; j < pts.length; j++)
-					mask.taperedSegment(pts[j - 1], pts[j]);
+					marks.segments.push([pts[j - 1], pts[j]]);
 			}
 		}
 	};
+	if (hole.kind !== "spray") {
+		punch(hole.x, hole.y, hole.r, shotRng);
+		return marks;
+	}
+	// Pellets: clustered toward the aim, none past the spread.
+	const n = shotRng.int(6, 10);
+	for (let j = 0; j < n; j++) {
+		const a = shotRng.range(0, 2 * Math.PI);
+		const d =
+			hole.r * SPRAY_SPREAD * Math.min(1, Math.abs(shotRng.gaussian(0, 0.5)));
+		const pr = hole.r * shotRng.range(0.6, 1);
+		punch(
+			hole.x + Math.cos(a) * d,
+			hole.y + Math.sin(a) * d,
+			pr,
+			shotRng.fork(`pellet-${j}`),
+		);
+	}
+	return marks;
+}
+
+/** Punch anti-aliased circular holes, with cracks, through the ink. */
+async function render({
+	input,
+	params,
+	state,
+	rng,
+}: RenderContext<Params, State>) {
+	const out = cloneRaster(input);
+	const { width: w, height: h, data } = out;
+	const mask = new CutMask(w, h);
 	state.holes.forEach((hole, i) => {
-		const shotRng = rng.fork(`hole-${hole.id ?? i}`);
-		if (hole.kind !== "spray") {
-			punch(hole.x, hole.y, hole.r, shotRng);
-			return;
-		}
-		// Pellets: clustered toward the aim, none past the spread.
-		const n = shotRng.int(6, 10);
-		for (let j = 0; j < n; j++) {
-			const a = shotRng.range(0, 2 * Math.PI);
-			const d =
-				hole.r * SPRAY_SPREAD * Math.min(1, Math.abs(shotRng.gaussian(0, 0.5)));
-			const pr = hole.r * shotRng.range(0.6, 1);
-			punch(
-				hole.x + Math.cos(a) * d,
-				hole.y + Math.sin(a) * d,
-				pr,
-				shotRng.fork(`pellet-${j}`),
-			);
-		}
+		const marks = shotMarks(hole, params.crackSize, rng.fork(`hole-${hole.id ?? i}`));
+		for (const c of marks.circles) mask.circle(c.x, c.y, c.r);
+		for (const [a, b] of marks.segments) mask.taperedSegment(a, b);
 	});
 	for (let i = 0; i < mask.cover.length; i++) {
 		if (mask.cover[i] > 0) data[i * 4 + 3] *= 1 - mask.cover[i];
 	}
 	return { raster: out };
+}
+
+/** The same marks as an SVG path: circles, and segments as tapered capsules. */
+function marksPath({ circles, segments }: ShotMarks): string {
+	const circle = (x: number, y: number, r: number) =>
+		r > 0
+			? `M${x - r} ${y}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0Z`
+			: "";
+	const parts = circles.map((c) => circle(c.x, c.y, c.r));
+	for (const [a, b] of segments) {
+		const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+		const nx = -(b.y - a.y) / len;
+		const ny = (b.x - a.x) / len;
+		parts.push(
+			`M${a.x + nx * a.w} ${a.y + ny * a.w}L${b.x + nx * b.w} ${b.y + ny * b.w}` +
+				`L${b.x - nx * b.w} ${b.y - ny * b.w}L${a.x - nx * a.w} ${a.y - ny * a.w}Z`,
+			circle(a.x, a.y, a.w),
+			circle(b.x, b.y, b.w),
+		);
+	}
+	return parts.join("");
+}
+
+/** How long a shot in the interface stays, in ms, plus per px of hole radius. */
+const BREAK_HOLD_MS = 1800;
+const BREAK_HOLD_PER_PX = 20;
+/** A spray's break stays this many times longer. */
+const SPRAY_BREAK_HOLD = 1.25;
+
+/** A shot that missed the Canvas: the same marks, over the interface. */
+function shootInterface(
+	hole: { x: number; y: number; r: number; kind: "single" | "spray" },
+	crackSize: number,
+	toScreen: DOMMatrixReadOnly,
+) {
+	const marks = shotMarks(hole, crackSize, createRng(randomSeed()));
+	breakInterface({
+		holdMs:
+			(BREAK_HOLD_MS + hole.r * BREAK_HOLD_PER_PX) *
+			(hole.kind === "spray" ? SPRAY_BREAK_HOLD : 1),
+		draw: (container) =>
+			imageGroup(container, toScreen).append(paperPath(marksPath(marks))),
+	});
 }
 
 /** Aiming reticle: the hole's ring, with ticks crossing it and a center dot. */
@@ -334,6 +402,14 @@ function Crosshair({ x, y, r }: { x: number; y: number; r: number }) {
 	);
 }
 
+/** Where a shot goes: an image point, and whether it's on the Canvas. */
+interface Aim {
+	p: ImagePoint;
+	onCanvas: boolean;
+	/** Image px → viewport px, for drawing off the Canvas. */
+	toScreen: DOMMatrixReadOnly;
+}
+
 function ShootEditor({
 	input,
 	params,
@@ -344,10 +420,10 @@ function ShootEditor({
 	assets,
 }: EditorProps<Params, State, Tools>) {
 	const result = useRender(render, input, params, state, seed, assets);
-	const [hover, setHover] = useState<ImagePoint | null>(null);
+	const [hover, setHover] = useState<Aim | null>(null);
 	const timers = useRef<number[]>([]);
 	// While held: where to aim next, and the repeating trigger.
-	const aim = useRef<ImagePoint | null>(null);
+	const aim = useRef<Aim | null>(null);
 	const autoFire = useRef<number | null>(null);
 	const stopFiring = () => {
 		if (autoFire.current !== null) clearInterval(autoFire.current);
@@ -361,11 +437,19 @@ function ShootEditor({
 		},
 		[],
 	);
+	// Aiming at the interface: the crosshair stands in for the cursor.
+	const aimingOut = hover !== null && !hover.onCanvas;
+	useEffect(() => {
+		if (!aimingOut) return;
+		document.documentElement.classList.add("hide-cursor");
+		return () => document.documentElement.classList.remove("hide-cursor");
+	}, [aimingOut]);
 
 	const spray = tools.shotType === "spray";
 
-	// A shot: the camera shakes, then the hole (or a spray's pellets) appears.
-	const shoot = (p: ImagePoint) => {
+	// A shot: the camera shakes, then the hole (or a spray's pellets) appears,
+	// in the image, or over the interface if it missed the Canvas.
+	const shoot = ({ p, onCanvas, toScreen }: Aim) => {
 		const r = tools.size / 2;
 		const kind = tools.shotType;
 		// Bigger holes, bigger shake; never less than the default size's.
@@ -376,6 +460,10 @@ function ShootEditor({
 		);
 		const t = window.setTimeout(() => {
 			timers.current = timers.current.filter((x) => x !== t);
+			if (!onCanvas) {
+				shootInterface({ x: p.x, y: p.y, r, kind }, params.crackSize, toScreen);
+				return;
+			}
 			setState((s) => ({
 				...s,
 				holes: [...s.holes, { x: p.x, y: p.y, r, id: randomSeed(), kind }],
@@ -384,17 +472,33 @@ function ShootEditor({
 		timers.current.push(t);
 	};
 
-	// Press to shoot; hold to keep shooting at the cursor. Each shot is saved
-	// as its own hole, same as a single press.
-	const startFiring = (p: ImagePoint) => {
+	// Press to shoot; hold to keep shooting at the cursor, even off the
+	// Canvas. Each shot in the image is saved as its own hole, same as a
+	// single press.
+	const startFiring = (a: Aim) => {
 		stopFiring();
-		aim.current = p;
-		shoot(p);
+		aim.current = a;
+		shoot(a);
 		autoFire.current = window.setInterval(
 			() => aim.current && shoot(aim.current),
 			1000 / (tools.fireRate * (spray ? SPRAY_RATE : 1)),
 		);
 	};
+
+	const aimAt = (p: ImagePoint, e: PointerEvent<SVGSVGElement>): Aim => ({
+		p,
+		onCanvas: isOnCanvas(e),
+		toScreen: imageToScreen(e.currentTarget),
+	});
+
+	const crosshair = hover && (
+		<Crosshair
+			x={hover.p.x}
+			y={hover.p.y}
+			// A spray aims with its spread.
+			r={(tools.size / 2) * (spray ? SPRAY_SPREAD : 1)}
+		/>
+	);
 
 	return (
 		<>
@@ -402,27 +506,29 @@ function ShootEditor({
 				// Output is the same size as input, so image coords map 1:1.
 				image={result.output?.raster ?? input}
 				cursor="none"
-				onPointerMove={(p) => {
-					setHover(p);
-					if (aim.current) aim.current = p;
+				onPointerMove={(p, e) => {
+					const a = aimAt(p, e);
+					setHover(a);
+					if (aim.current) aim.current = a;
 				}}
 				onPointerLeave={() => {
 					setHover(null);
 					stopFiring();
 				}}
-				onPointerDown={startFiring}
-				onPointerUp={stopFiring}
-				overlay={
-					hover && (
-						<Crosshair
-							x={hover.x}
-							y={hover.y}
-							// A spray aims with its spread.
-							r={(tools.size / 2) * (spray ? SPRAY_SPREAD : 1)}
-						/>
-					)
-				}
+				onPointerDown={(p, e) => {
+					// Keep getting the pointer off the Canvas, to shoot the interface.
+					e.currentTarget.setPointerCapture(e.pointerId);
+					startFiring(aimAt(p, e));
+				}}
+				onPointerUp={(_, e) => {
+					stopFiring();
+					if (!isOnCanvas(e)) setHover(null);
+				}}
+				overlay={hover?.onCanvas && crosshair}
 			/>
+			{hover && !hover.onCanvas && (
+				<ScreenOverlay toScreen={hover.toScreen}>{crosshair}</ScreenOverlay>
+			)}
 			<OutputStatus result={result} />
 		</>
 	);

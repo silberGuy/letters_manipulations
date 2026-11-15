@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { numberField, randomOrNumberField } from "../core/fields";
 import {
@@ -16,7 +16,12 @@ import { randomSeed } from "../core/rng";
 import { useRender } from "../core/useRender";
 import { useAppElement } from "../store/appElement";
 import { OutputStatus } from "../ui/OutputStatus";
-import { RasterView, type ImagePoint } from "../ui/RasterView";
+import { breakInterface, imageGroup, paperPath } from "../ui/interfaceBreak";
+import {
+	imageToScreen,
+	RasterView,
+	type ImagePoint,
+} from "../ui/RasterView";
 import { shake } from "../ui/shake";
 
 const paramsSchema = z.object({});
@@ -314,6 +319,89 @@ function newCrack(
 	};
 }
 
+/**
+ * The crack's gap in the Output, as a closed outline: its + edge, then its −
+ * edge back, carried on past `a` and `b` along the line for s in [s0, s1]
+ * (s measured from `a`). Past the thin end it narrows to a point; past the
+ * wide end it keeps widening.
+ */
+function gapOutline(c: Crack, s0: number, s1: number): Point[] {
+	const g = crackGeom(c);
+	// The width there is 2·(half0 + s·sin): stop where it closes.
+	if (g.sin > 0) s0 = Math.max(s0, -g.half0 / g.sin);
+	else if (g.sin < 0) s1 = Math.min(s1, -g.half0 / g.sin);
+	if (s1 <= s0) return [];
+	const period = c.period ?? Math.max(4, c.rough * 5);
+	// Fine enough for the finer zig-zags, but bounded for long spans.
+	const step = Math.max(period / 8, (s1 - s0) / 3000);
+	// Where the input's edge point at s goes on `side`, as in forward().
+	const at = (s: number, side: number): Point => {
+		const d = g.edge(s);
+		const ss = s * g.cos - side * d * g.sin;
+		const dd = side * s * g.sin + d * g.cos + side * g.half0;
+		return { x: g.ax + ss * g.ux + dd * g.nx, y: g.ay + ss * g.uy + dd * g.ny };
+	};
+	const plus: Point[] = [];
+	const minus: Point[] = [];
+	for (let s = s0; ; s = Math.min(s1, s + step)) {
+		plus.push(at(s, 1));
+		minus.push(at(s, -1));
+		if (s >= s1) break;
+	}
+	return [...plus, ...minus.reverse()];
+}
+
+/** How long a crack in the interface stays, in ms, plus per px of its wide end. */
+const BREAK_HOLD_MS = 1500;
+const BREAK_HOLD_PER_PX = 10;
+
+/**
+ * The crack carried on over the whole interface, as the same crack: the same
+ * line and taper, white like the gap. Left out over the image, where the real
+ * crack shows.
+ */
+function crackInterface(
+	c: Crack,
+	image: { width: number; height: number },
+	toScreen: DOMMatrixReadOnly,
+) {
+	// How far along the line the window reaches, in image px.
+	const toImage = toScreen.inverse();
+	const ux = c.b.x - c.a.x;
+	const uy = c.b.y - c.a.y;
+	const len = Math.hypot(ux, uy) || 1;
+	const along = [
+		[0, 0],
+		[window.innerWidth, 0],
+		[0, window.innerHeight],
+		[window.innerWidth, window.innerHeight],
+	].map(([x, y]) => {
+		const p = toImage.transformPoint(new DOMPoint(x, y));
+		return ((p.x - c.a.x) * ux + (p.y - c.a.y) * uy) / len;
+	});
+	const pad = Math.max(c.w0, c.w1) + c.rough;
+	const outline = gapOutline(
+		c,
+		Math.min(...along) - pad,
+		Math.max(...along) + pad,
+	);
+	if (outline.length === 0) return;
+	breakInterface({
+		holdMs: BREAK_HOLD_MS + c.w1 * BREAK_HOLD_PER_PX,
+		draw: (container) =>
+			imageGroup(container, toScreen, {
+				x: 0,
+				y: 0,
+				width: image.width,
+				height: image.height,
+			}).append(
+				paperPath(`M${outline.map((p) => `${p.x} ${p.y}`).join("L")}Z`),
+			),
+	});
+}
+
+/** When, into the shake, the crack opens. */
+const BURST_AT_MS = 60;
 /** Wide-end width (px) up to which the shake stays at its minimum. */
 const SHAKE_BASE_WIDTH = 40;
 /** How much harder a crack shakes than a single shot. */
@@ -360,19 +448,57 @@ function CrackEditor({
 	const preview =
 		hover && newCrack(hover, angle, tools, input.width, input.height);
 
+	// A click shakes at once; BURST_AT_MS later (or once its render lands, if
+	// later still) the crack opens in the image and across the interface
+	// together. Until then the preview holds the image from before the click.
+	const [held, setHeld] = useState<ImageData | null>(null);
+	const bursts = useRef<
+		{ crack: Crack; toScreen: DOMMatrixReadOnly; at: number }[]
+	>([]);
+	const burstTimer = useRef<number | undefined>(undefined);
+	useEffect(() => () => clearTimeout(burstTimer.current), []);
+	useEffect(() => {
+		if (bursts.current.length === 0 || !result.output) return;
+		// This output is the latest State's, so it has every clicked crack
+		// that's still there.
+		const opened = new Set(state.cracks.map((c) => c.id));
+		const at = Math.max(...bursts.current.map((b) => b.at));
+		clearTimeout(burstTimer.current);
+		burstTimer.current = window.setTimeout(
+			() => {
+				for (const { crack, toScreen } of bursts.current) {
+					// Gone already (e.g. undone): it never opened.
+					if (opened.has(crack.id)) crackInterface(crack, input, toScreen);
+				}
+				bursts.current = [];
+				setHeld(null);
+			},
+			Math.max(0, at - performance.now()),
+		);
+	}, [result.output]);
+
 	return (
 		<>
 			<RasterView
 				// Output is the same size as input, so image coords map 1:1.
-				image={result.output?.raster ?? input}
+				image={held ?? result.output?.raster ?? input}
 				cursor="crosshair"
 				onPointerMove={setHover}
 				onPointerLeave={() => setHover(null)}
-				onPointerDown={(p) => {
+				onPointerDown={(p, e) => {
 					const crack = newCrack(p, angle, tools, input.width, input.height);
 					if (!crack) return;
+					// A newer render is coming: don't open anything before it lands.
+					clearTimeout(burstTimer.current);
+					setHeld((h) => h ?? result.output?.raster ?? input);
 					setState((s) => ({ ...s, cracks: [...s.cracks, crack] }));
-					// The sides burst apart: shake across the crack, harder for wider ones.
+					bursts.current.push({
+						crack,
+						toScreen: imageToScreen(e.currentTarget),
+						at: performance.now() + BURST_AT_MS,
+					});
+					// The sides are about to burst apart: shake across the crack,
+					// harder for wider ones.
 					shake(
 						useAppElement.getState().appElement,
 						Math.max(1, crack.w1 / SHAKE_BASE_WIDTH) * SHAKE_STRENGTH,
