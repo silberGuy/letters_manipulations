@@ -10,10 +10,27 @@ import {
 } from "../core/manipulation";
 import { context2d, rasterToCanvas } from "../core/raster";
 import { remapItems, type Remap } from "../core/remap";
-import { randomSeed, type Rng } from "../core/rng";
+import { createRng, randomSeed, type Rng } from "../core/rng";
 import { useRender } from "../core/useRender";
 import { OutputStatus } from "../ui/OutputStatus";
-import { RasterView, type ImagePoint } from "../ui/RasterView";
+import {
+	imageToScreen,
+	isOnCanvas,
+	RasterView,
+	type ImagePoint,
+} from "../ui/RasterView";
+import {
+	cropPixels,
+	snapshotInterface,
+	type InterfaceSnapshot,
+} from "../ui/snapshot";
+import {
+	interfaceInk,
+	snapshotBox,
+	snapshotBreak,
+	toSnapshot,
+	type SnapshotBreak,
+} from "../ui/snapshotBreak";
 import {
 	vectorize,
 	vectorizeOptionsSchema,
@@ -93,8 +110,9 @@ const acidSchema = z.object({
 		label: "Slowdown over paper",
 		min: 1,
 		max: 5,
-		step: 1,
-		default: 2,
+		step: 0.05,
+		default: 1.3,
+		hint: "How much slower the acid crosses paper than ink; 1 = no slowdown",
 	}),
 	spawnRate: numberField({
 		label: "Spawn rate",
@@ -783,6 +801,92 @@ function remapState(state: State, remap: Remap): State {
 // ---------------------------------------------------------------------------
 // Editor
 
+// ---------------------------------------------------------------------------
+// Interface Break
+
+/** How long acid on the interface waits, once the press ends, before its Workers set out, in ms. */
+const WORKER_DELAY_MS = 400;
+/** How long the Workers work on it once they're all there, in ms. */
+const WORK_MS = 1200;
+
+/**
+ * Presses dragged off the Canvas foam on the interface too: in a snapshot of
+ * it, the acid spreads from each through the interface's own ink (its dark
+ * pixels), eating it and leaving rings there just as on the letters. Each
+ * press gets the same random stream as in render.
+ */
+function acidInterface(
+	toScreen: DOMMatrixReadOnly,
+	canvas: DOMRectReadOnly,
+	snapshot: Promise<InterfaceSnapshot | null>,
+	params: Params,
+	seed: number,
+): SnapshotBreak<Press[]> {
+	const toViewport = (p: Press) => {
+		const c = toScreen.transformPoint(new DOMPoint(p.x, p.y));
+		return { x: c.x, y: c.y };
+	};
+	const onCanvas = (p: Press) => {
+		const c = toViewport(p);
+		return (
+			c.x >= canvas.left &&
+			c.x < canvas.right &&
+			c.y >= canvas.top &&
+			c.y < canvas.bottom
+		);
+	};
+	return snapshotBreak<Press[]>({
+		snapshot,
+		toScreen,
+		canvas,
+		holes: "paper",
+		delayMs: WORKER_DELAY_MS,
+		workMs: WORK_MS,
+		crew: (presses) => presses.map(toViewport),
+		render: (snap, presses) => {
+			// The presses off the Canvas, and all sizes, in snapshot px.
+			const k = toScreen.a * snap.scale;
+			const off = presses
+				.filter((p) => !onCanvas(p))
+				.map((p) => ({ ...p, ...toSnapshot(snap, toScreen, p.x, p.y), speed: p.speed * k }));
+			const scaled: Params = {
+				...params,
+				ringWidth: params.ringWidth * k,
+				gooRadius: params.gooRadius * k,
+				minRadius: params.minRadius * k,
+				maxRadius: params.maxRadius * k,
+			};
+			const margin =
+				Math.max(scaled.minRadius, scaled.maxRadius) +
+				scaled.ringWidth +
+				blurMargin(scaled.gooRadius) +
+				2;
+			const box = snapshotBox(
+				snap,
+				off.map((p) => ({ x: p.x, y: p.y, r: p.speed * Math.sqrt(p.duration) + margin })),
+			);
+			if (!box) return null;
+			const { x0, y0, w, h } = box;
+			const crop = cropPixels(snap.pixels, x0, y0, w, h);
+			const ink = interfaceInk(crop);
+			const rng = createRng(seed);
+			const bubbles = off.flatMap((press, i) =>
+				pressBubbles(
+					ink,
+					{ ...press, x: press.x - x0, y: press.y - y0 },
+					scaled,
+					rng.fork(`press-${press.id ?? i}`),
+				),
+			);
+			const { raster } = renderRaster(crop, bubbles, scaled.ringWidth, scaled.gooRadius);
+			return { pixels: raster, x: x0, y: y0 };
+		},
+	});
+}
+
+// ---------------------------------------------------------------------------
+// Editor
+
 interface Gesture {
 	done: Press[];
 	/**
@@ -792,6 +896,13 @@ interface Gesture {
 	current: { x: number; y: number; start: number; id: number };
 	/** Acid settings at the start of the gesture, copied into each of its presses. */
 	acid: Tools;
+	/** Image px → viewport px, and the Canvas on screen, from the press. */
+	toScreen: DOMMatrixReadOnly;
+	canvas: DOMRectReadOnly;
+	/** The interface as it was at the press, for foaming on it if the drag leaves the Canvas. */
+	snapshot: Promise<InterfaceSnapshot | null>;
+	/** Once the drag has left the Canvas: the acid on the interface. */
+	interfaceAcid: SnapshotBreak<Press[]> | null;
 }
 
 function BubblingAcidEditor({
@@ -833,10 +944,16 @@ function BubblingAcidEditor({
 	useEffect(() => {
 		if (!holding || result.pending) return;
 		const id = requestAnimationFrame(() => {
-			if (gesture.current) setLive(snapshot(performance.now()));
+			const g = gesture.current;
+			if (!g) return;
+			const presses = snapshot(performance.now());
+			setLive(presses);
+			g.interfaceAcid?.update(presses);
 		});
 		return () => cancelAnimationFrame(id);
 	}, [holding, result]);
+	// Acid on the interface still foaming when the editor goes away: let it be fixed.
+	useEffect(() => () => gesture.current?.interfaceAcid?.settle(), []);
 
 	const onDown = (p: ImagePoint, e: PointerEvent<SVGSVGElement>) => {
 		e.currentTarget.setPointerCapture(e.pointerId);
@@ -844,6 +961,10 @@ function BubblingAcidEditor({
 			done: [],
 			current: { ...p, start: performance.now(), id: randomSeed() },
 			acid: tools,
+			toScreen: imageToScreen(e.currentTarget),
+			canvas: e.currentTarget.getBoundingClientRect(),
+			snapshot: snapshotInterface(),
+			interfaceAcid: null,
 		};
 		spread.current = null;
 		setLive(snapshot(performance.now()));
@@ -878,10 +999,18 @@ function BubblingAcidEditor({
 	// A drag keeps feeding the current press while the pointer stays inside its
 	// spread, and starts a new press once it outruns the acid. PRESS_SPACING is a
 	// floor, so jitter right after pressing doesn't start new presses.
-	const onMove = (p: ImagePoint) => {
+	const onMove = (p: ImagePoint, e: PointerEvent<SVGSVGElement>) => {
 		setHover(p);
 		const g = gesture.current;
 		if (!g) return;
+		if (!g.interfaceAcid && !isOnCanvas(e))
+			g.interfaceAcid = acidInterface(
+				g.toScreen,
+				g.canvas,
+				g.snapshot,
+				params,
+				seed,
+			);
 		if (Math.hypot(p.x - g.current.x, p.y - g.current.y) < PRESS_SPACING)
 			return;
 		const now = performance.now();
@@ -892,9 +1021,14 @@ function BubblingAcidEditor({
 	};
 
 	const onUp = () => {
-		if (!gesture.current) return;
+		const g = gesture.current;
+		if (!g) return;
 		const presses = snapshot(performance.now());
 		gesture.current = null;
+		if (g.interfaceAcid) {
+			g.interfaceAcid.update(presses);
+			g.interfaceAcid.settle();
+		}
 		setState((s) => ({ ...s, presses: [...s.presses, ...presses] }));
 		setLive(null);
 		setHolding(false);
