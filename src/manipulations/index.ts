@@ -1,6 +1,7 @@
 import { describeFields } from '../core/fields';
 import type { Manipulation } from '../core/manipulation';
 import { bubblingAcid } from './bubbling-acid';
+import { crack } from './crack';
 import { goo } from './goo';
 import { grass } from './grass';
 import { gridWarp } from './grid-warp';
@@ -9,7 +10,7 @@ import { eatingAcid } from './eating-acid';
 import { skew } from './skew';
 import { tear } from './tear';
 
-export const MANIPULATIONS: Manipulation[] = [goo, skew, shoot, bubblingAcid, eatingAcid, tear, gridWarp, grass];
+export const MANIPULATIONS: Manipulation[] = [goo, skew, shoot, bubblingAcid, eatingAcid, tear, gridWarp, grass, crack];
 
 // Fail at startup, not mid-session, if a Manipulation's schemas are unusable.
 for (const m of MANIPULATIONS) {

@@ -2,7 +2,7 @@ import { getManipulation } from '../manipulations';
 import type { AssetResolver, Output } from './manipulation';
 import { rasterizeSource } from './rasterizeSource';
 import type { Recipe, Step } from './recipe';
-import type { Remap } from './remap';
+import { identityRemap, throughDisplacement, type Displacement, type Remap } from './remap';
 import { createRng } from './rng';
 
 export function runStep(step: Step, input: ImageData, assets: AssetResolver): Promise<Output> {
@@ -27,10 +27,35 @@ export async function renderRecipe(recipe: Recipe, assets: AssetResolver): Promi
   return runStep(recipe.steps[last], await renderInput(recipe, last, assets), assets);
 }
 
-/** Move every Step's State along with an edit of the Source (see Manipulation.remapState). */
+function displacementOf(step: Step | null): Displacement | null {
+  if (!step) return null;
+  return getManipulation(step.manipulationId).displacement?.(step.state) ?? null;
+}
+
+/**
+ * Move every Step's State along with `remap`, a move of the first Step's input
+ * (see Manipulation.remapState). Steps that move points (Manipulation.displacement)
+ * carry it through to the Steps after them.
+ */
 export function remapSteps(steps: Step[], remap: Remap): Step[] {
+  let r = remap;
   return steps.map((step) => {
     const m = getManipulation(step.manipulationId);
-    return m.remapState ? { ...step, state: m.remapState(step.state, remap) } : step;
+    const next = m.remapState ? { ...step, state: m.remapState(step.state, r) } : step;
+    r = throughDisplacement(r, displacementOf(step), displacementOf(next));
+    return next;
   });
+}
+
+/**
+ * Replace Step `i` (or remove it, with null). When that changes how it moves
+ * points, later Steps' State moves along, e.g. effects after a Crack Step
+ * follow the pixels when another Crack opens.
+ */
+export function replaceStep(steps: Step[], i: number, next: Step | null): Step[] {
+  const prev = steps[i];
+  const later = steps.slice(i + 1);
+  const unchanged = next && next.manipulationId === prev.manipulationId && next.state === prev.state;
+  const remap = unchanged ? identityRemap : throughDisplacement(identityRemap, displacementOf(prev), displacementOf(next));
+  return [...steps.slice(0, i), ...(next ? [next] : []), ...(remap === identityRemap ? later : remapSteps(later, remap))];
 }

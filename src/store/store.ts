@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Manipulation, Updater } from '../core/manipulation';
-import { remapSteps } from '../core/pipeline';
+import { remapSteps, replaceStep } from '../core/pipeline';
 import { defaultSource, type Recipe, type Source, type Step } from '../core/recipe';
 import { remapBetween, type Remap } from '../core/remap';
 import { randomSeed } from '../core/rng';
@@ -74,9 +74,10 @@ async function sha256(blob: Blob): Promise<string> {
 }
 
 export const useStore = create<AppStore>()((set, get) => {
+  // Later Steps' State follows when the Step changes how it moves points.
   const updateStep = (i: number, fn: (step: Step) => Step) =>
     set(({ recipe }) => ({
-      recipe: { ...recipe, steps: recipe.steps.map((s, j) => (j === i ? fn(s) : s)) },
+      recipe: { ...recipe, steps: replaceStep(recipe.steps, i, fn(recipe.steps[i])) },
     }));
 
   return {
@@ -101,7 +102,7 @@ export const useStore = create<AppStore>()((set, get) => {
     removeStep: (i) =>
       set(({ recipe, selectedStep }) => {
         if (recipe.steps.length <= 1) return {};
-        const steps = recipe.steps.filter((_, j) => j !== i);
+        const steps = replaceStep(recipe.steps, i, null);
         // Deleting the open tab selects the one before it (or the new first tab).
         const shift = i < selectedStep || (i === selectedStep && i > 0);
         return { recipe: { ...recipe, steps }, selectedStep: shift ? selectedStep - 1 : selectedStep, showFinal: false };

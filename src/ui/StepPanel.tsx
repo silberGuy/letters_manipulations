@@ -11,7 +11,7 @@ export function StepPanel({ stepIndex }: { stepIndex: number }) {
   const storedTools = useStore((s) => s.tools[step.manipulationId]);
   const { setParams, setTools, setSeed, resetStep, selectManipulation } = useStore.getState();
   const m = getManipulation(step.manipulationId);
-  const tools = useMemo(() => storedTools ?? m.toolsSchema.parse({}), [storedTools, m]);
+  const tools = useMemo(() => m.toolsSchema.parse(storedTools ?? {}), [storedTools, m]);
   const hasParams = describeFields(m.paramsSchema, m.id).length > 0;
   const hasTools = describeFields(m.toolsSchema, m.id).length > 0;
 

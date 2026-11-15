@@ -12,6 +12,7 @@ import { randomSeed, type Rng } from "../core/rng";
 import { useRender } from "../core/useRender";
 import { OutputStatus } from "../ui/OutputStatus";
 import { useAppElement } from "../store/appElement";
+import { shake } from "../ui/shake";
 import { RasterView, type ImagePoint } from "../ui/RasterView";
 
 const paramsSchema = z.object({
@@ -59,8 +60,6 @@ const toolsSchema = z.object({
 	}),
 });
 
-/** How long the camera shakes. */
-const SHAKE_MS = 160;
 /** When, into the shake, the hole appears. */
 const HOLE_AT_MS = 80;
 /** Hole size (px) up to which the shake stays at its minimum. */
@@ -72,30 +71,6 @@ const SPRAY_SPREAD = 5;
 const SPRAY_RATE = 0.3;
 /** Spray shakes this many times harder. */
 const SPRAY_SHAKE = 3;
-
-/** Shakes in progress; the page's overflow is hidden while any run. */
-let activeShakes = 0;
-
-/**
- * A short vertical "camera" shake of the whole interface. Hides the page's
- * overflow meanwhile so the moving app can't flash a scrollbar.
- */
-function shake(el: HTMLElement | null, holeSize: number, strength = 1) {
-	if (!el) return;
-	activeShakes++;
-	document.body.style.overflow = "hidden";
-	// Bigger holes, bigger shake; never less than the default size's.
-	const k = Math.max(1, holeSize / SHAKE_BASE_SIZE) * strength;
-	const animation = el.animate(
-		[0, -7, 5, -3, 2, 0].map((y) => ({ translate: `0 ${y * k}px` })),
-		{ duration: SHAKE_MS, easing: "ease-out" },
-	);
-	const done = () => {
-		if (--activeShakes === 0) document.body.style.overflow = "";
-	};
-	animation.addEventListener("finish", done);
-	animation.addEventListener("cancel", done);
-}
 
 type Params = z.output<typeof paramsSchema>;
 type State = z.output<typeof stateSchema>;
@@ -393,10 +368,11 @@ function ShootEditor({
 	const shoot = (p: ImagePoint) => {
 		const r = tools.size / 2;
 		const kind = tools.shotType;
+		// Bigger holes, bigger shake; never less than the default size's.
 		shake(
 			useAppElement.getState().appElement,
-			tools.size,
-			kind === "spray" ? SPRAY_SHAKE : 1,
+			Math.max(1, tools.size / SHAKE_BASE_SIZE) *
+				(kind === "spray" ? SPRAY_SHAKE : 1),
 		);
 		const t = window.setTimeout(() => {
 			timers.current = timers.current.filter((x) => x !== t);

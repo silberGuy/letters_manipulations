@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react';
 import type { z } from 'zod';
-import type { Remap } from './remap';
+import type { Displacement, Remap } from './remap';
 import type { Rng } from './rng';
 
 /** What a Manipulation produces. Raster always; vector when it has one. */
@@ -80,6 +80,14 @@ export interface ManipulationDefinition<
    * it, State stays where it is.
    */
   remapState?(state: z.output<SS>, remap: Remap): z.output<SS>;
+  /**
+   * How this State moves points from the input to the Output, for
+   * Manipulations that move pixels around (e.g. Cracks). When the State
+   * changes, later Steps' State is moved along with it; and edits of the Source
+   * are carried through it to later Steps. Must depend on State only. Without
+   * it, points stay where they are.
+   */
+  displacement?(state: z.output<SS>): Displacement;
   Component: ComponentType<EditorProps<z.output<PS>, z.output<SS>, z.output<TS>>>;
 }
 
@@ -95,6 +103,7 @@ export interface Manipulation {
   toolsSchema: z.ZodObject;
   render(ctx: RenderContext<Values, Values>): Promise<Output>;
   remapState?(state: Values, remap: Remap): Values;
+  displacement?(state: Values): Displacement;
   Component: ComponentType<EditorProps<Values, Values, Values>>;
 }
 

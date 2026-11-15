@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { z } from 'zod';
-import { describeFields, type AssetRef, type Field, type Point } from '../core/fields';
+import { describeFields, type AssetRef, type Field, type FieldMeta, type Point, type RandomOrNumber } from '../core/fields';
 import { useStore } from '../store/store';
 import { Select } from './Select';
 
@@ -34,32 +34,14 @@ export function ControlsPanel({ schema, owner, values, onChange }: Props) {
 
 function Control({ field, value, onChange }: { field: Field; value: unknown; onChange(v: unknown): void }) {
   const { meta } = field;
+  // Holds its own labelled checkbox, so the whole control can't be one label.
+  const Wrapper = field.kind === 'randomOrNumber' ? 'div' : 'label';
   return (
-    <label className={`control control-${field.kind}`} title={meta.hint}>
+    <Wrapper className={`control control-${field.kind}`} title={meta.hint}>
       <span className="control-label muted">{field.label}</span>
-      {field.kind === 'number' && (
-        <span className="control-row">
-          {meta.min !== undefined && meta.max !== undefined && (
-            <input
-              className="range"
-              type="range"
-              min={meta.min}
-              max={meta.max}
-              step={meta.step}
-              value={value as number}
-              onChange={(e) => onChange(e.target.valueAsNumber)}
-            />
-          )}
-          <input
-            className="input"
-            type="number"
-            min={meta.min}
-            max={meta.max}
-            step={meta.step}
-            value={value as number}
-            onChange={(e) => !Number.isNaN(e.target.valueAsNumber) && onChange(e.target.valueAsNumber)}
-          />
-        </span>
+      {field.kind === 'number' && <NumberInput meta={meta} value={value as number} onChange={onChange} />}
+      {field.kind === 'randomOrNumber' && (
+        <RandomOrNumberControl meta={meta} value={value as RandomOrNumber} onChange={onChange} />
       )}
       {field.kind === 'boolean' && (
         <input className="checkbox" type="checkbox" checked={value as boolean} onChange={(e) => onChange(e.target.checked)} />
@@ -76,7 +58,60 @@ function Control({ field, value, onChange }: { field: Field; value: unknown; onC
       )}
       {field.kind === 'point' && <PointControl value={value as Point} onChange={onChange} />}
       {field.kind === 'image' && <ImageControl value={value as AssetRef | null} onChange={onChange} />}
-    </label>
+    </Wrapper>
+  );
+}
+
+function NumberInput({ meta, value, onChange }: { meta: FieldMeta; value: number; onChange(v: number): void }) {
+  return (
+    <span className="control-row">
+      {meta.min !== undefined && meta.max !== undefined && (
+        <input
+          className="range"
+          type="range"
+          min={meta.min}
+          max={meta.max}
+          step={meta.step}
+          value={value}
+          onChange={(e) => onChange(e.target.valueAsNumber)}
+        />
+      )}
+      <input
+        className="input"
+        type="number"
+        min={meta.min}
+        max={meta.max}
+        step={meta.step}
+        value={value}
+        onChange={(e) => !Number.isNaN(e.target.valueAsNumber) && onChange(e.target.valueAsNumber)}
+      />
+    </span>
+  );
+}
+
+/** A "Random" checkbox; when it's off, the number. */
+function RandomOrNumberControl({
+  meta,
+  value,
+  onChange,
+}: {
+  meta: FieldMeta;
+  value: RandomOrNumber;
+  onChange(v: RandomOrNumber): void;
+}) {
+  return (
+    <>
+      <label className="control-row">
+        <input
+          className="checkbox"
+          type="checkbox"
+          checked={value.random}
+          onChange={(e) => onChange({ ...value, random: e.target.checked })}
+        />
+        <span className="muted">Random</span>
+      </label>
+      {!value.random && <NumberInput meta={meta} value={value.value} onChange={(v) => onChange({ ...value, value: v })} />}
+    </>
   );
 }
 

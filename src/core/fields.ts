@@ -7,7 +7,7 @@ import { z } from 'zod';
  * initial values.
  */
 
-export type Widget = 'color' | 'point' | 'image';
+export type Widget = 'color' | 'point' | 'image' | 'randomOrNumber';
 
 export interface FieldMeta {
   label?: string;
@@ -61,6 +61,28 @@ export function pointField(o: { label: string; default: Point }) {
   return pointSchema.default(o.default).meta({ label: o.label, widget: 'point' });
 }
 
+/** A number, or "pick one at random" (the editor draws it; the number is kept for when random is off). */
+export interface RandomOrNumber {
+  random: boolean;
+  value: number;
+}
+
+export function randomOrNumberField(o: {
+  label: string;
+  min: number;
+  max: number;
+  step?: number;
+  default: number;
+  /** Start on random. */
+  random?: boolean;
+  hint?: string;
+}) {
+  return z
+    .object({ random: z.boolean(), value: z.number().min(o.min).max(o.max) })
+    .default({ random: o.random ?? false, value: o.default })
+    .meta({ label: o.label, min: o.min, max: o.max, step: o.step ?? 1, hint: o.hint, widget: 'randomOrNumber' });
+}
+
 /** Reference to an Asset in the Recipe, by content hash. */
 export const assetRefSchema = z.object({ asset: z.string() });
 export type AssetRef = z.output<typeof assetRefSchema>;
@@ -71,7 +93,7 @@ export function imageField(o: { label: string }) {
 
 // ---------------------------------------------------------------------------
 
-export type FieldKind = 'number' | 'boolean' | 'enum' | 'color' | 'point' | 'image';
+export type FieldKind = 'number' | 'boolean' | 'enum' | 'color' | 'point' | 'image' | 'randomOrNumber';
 
 export interface Field {
   key: string;
@@ -123,6 +145,7 @@ export function describeFields(schema: z.ZodObject, owner: string): Field[] {
     if (d.type === 'string' && meta.widget === 'color') return field('color');
     if (d.type === 'object' && meta.widget === 'point') return field('point');
     if (d.type === 'object' && meta.widget === 'image') return field('image');
+    if (d.type === 'object' && meta.widget === 'randomOrNumber') return field('randomOrNumber');
     throw new Error(
       `${owner}: field "${key}" has unsupported type "${d.type}"` +
         (meta.widget ? ` with widget "${meta.widget}"` : ''),

@@ -114,7 +114,7 @@ function StepEditor({ stepIndex }: { stepIndex: number }) {
   const storedTools = useStore((s) => s.tools[recipe.steps[stepIndex].manipulationId]);
   const step = recipe.steps[stepIndex];
   const m = getManipulation(step.manipulationId);
-  const tools = useMemo(() => storedTools ?? m.toolsSchema.parse({}), [storedTools, m]);
+  const tools = useMemo(() => m.toolsSchema.parse(storedTools ?? {}), [storedTools, m]);
   const { input, error } = useStepInput(recipe, stepIndex);
 
   const setParams = useCallback((u: Updater<Values>) => useStore.getState().setParams(stepIndex, u), [stepIndex]);

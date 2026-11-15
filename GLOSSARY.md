@@ -48,6 +48,14 @@ _Avoid_: Slash, line, path
 A corner of the grid laid over the image in a Manipulation's editor; the user drags Grid Points, alone or box-selected together, and render maps each cell bilinearly onto the quad of its moved corners. Stored in State as its rest position and offset.
 _Avoid_: Node, vertex, handle
 
+**Crack**:
+A break the Crack Manipulation opens across the whole image, edge to edge: the two sides move apart rigidly, leaving a jagged gap that is thin at one end and wide at the other. Stored in State as its line, end widths and the click it follows. Not the hairline cracks Shoot draws around its holes.
+_Avoid_: Split, rift, fault
+
+**Displacement**:
+How a Step moves points from its input to its Output (e.g. a Crack pushing each side away). When a Step's Displacement changes, the State of later Steps moves with it, and edits of the Source are carried through it.
+_Avoid_: Warp, deformation
+
 **Asset**:
 A user-supplied file (e.g. an uploaded image) that a Recipe refers to by content hash and carries with it.
 _Avoid_: Attachment, upload, resource

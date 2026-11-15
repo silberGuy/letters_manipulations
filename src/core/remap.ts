@@ -132,6 +132,37 @@ export function remapItems<T>(items: readonly T[], remap: Remap, how: ItemRemap<
   });
 }
 
+/**
+ * How a Step moves points from its input image to its Output (see
+ * Manipulation.displacement), so later Steps' State can follow.
+ */
+export interface Displacement {
+  forward(p: Point): Point;
+  /** Where an Output point came from. A point in a gap the Step opened goes to the nearest side. */
+  inverse(p: Point): Point;
+}
+
+/**
+ * A Remap of a Step's input carried through to its Output: back through how
+ * the Step moved points before, across `remap`, then forward through how it
+ * moves them now. A missing Displacement is the identity.
+ */
+export function throughDisplacement(remap: Remap, before: Displacement | null, after: Displacement | null): Remap {
+  if (!before && !after) return remap;
+  const locate = (p: Point): Located => {
+    const l = remap.locate(before ? before.inverse(p) : p);
+    return { to: after ? after.forward(l.to) : l.to, deleted: l.deleted };
+  };
+  return { locate, point: (p) => locate(p).to, scale: remap.scale };
+}
+
+/** The Remap that moves nothing. */
+export const identityRemap: Remap = {
+  locate: (p) => ({ to: p, deleted: false }),
+  point: (p) => p,
+  scale: 1,
+};
+
 /** The Remap from one Source to another, or null when they lay out the same. */
 export async function remapBetween(from: Source, to: Source): Promise<Remap | null> {
   if (from === to || JSON.stringify(from) === JSON.stringify(to)) return null;
